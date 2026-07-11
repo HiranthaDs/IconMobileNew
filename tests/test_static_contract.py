@@ -32,6 +32,14 @@ class StaticContractTests(unittest.TestCase):
         for private_name in ("erp.db", "main.py", ".env", "_backups"):
             self.assertNotIn(private_name, block)
 
+    def test_hosted_invoice_links_keep_the_public_origin(self):
+        api_client = (ROOT / "assets" / "local-api.js").read_text(encoding="utf-8")
+        invoice = (ROOT / "invoice.html").read_text(encoding="utf-8")
+        self.assertIn("isLoopbackHost(window.location.hostname)", api_client)
+        self.assertIn("A public/reverse-proxy hostname must never be replaced", api_client)
+        self.assertIn("urlParams.get('invoiceId')", invoice)
+        self.assertIn("static-only hosting cannot read the SQLite database", invoice)
+
 
 if __name__ == "__main__":
     unittest.main()

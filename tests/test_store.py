@@ -221,6 +221,145 @@ class SQLiteStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["transactions"][0]["transactionType"], "Partner_Profile")
         self.assertEqual(snapshot["clients"][0]["type"], "B2B")
 
+    def test_admin_can_delete_invoice_and_stock_is_reversed(self):
+        self.add_product()
+        self.store.execute_action({
+            "action": "checkout", "transactionType": "Sale", "invoiceId": "DELETE-ME",
+            "client": {"name": "Delete Customer"},
+            "items": [{"groupCode": "SKU-1", "unitImei": "UNIT-1", "finalPrice": 1000}],
+            "total": 1000,
+        }, actor_role="pos", device_id="test", operation_id="delete-sale")
+
+        result = self.store.execute_action(
+            {"action": "delete_transaction", "invoiceId": "DELETE-ME"},
+            actor_role="admin", device_id="test", operation_id="delete-invoice",
+        )
+        self.assertTrue(result["success"])
+        snapshot = self.store.snapshot()
+        self.assertEqual(snapshot["transactions"], [])
+        self.assertEqual(snapshot["inventory"][0]["Quantity"], "2")
+
+    def test_parent_invoice_requires_linked_return_to_be_deleted_first(self):
+        self.add_product()
+        self.store.execute_action({
+            "action": "checkout", "transactionType": "Sale", "invoiceId": "PARENT",
+            "client": {"name": "Customer"},
+            "items": [{"groupCode": "SKU-1", "unitImei": "UNIT-1", "finalPrice": 1000}],
+            "total": 1000,
+        }, actor_role="pos", device_id="test", operation_id="parent-sale")
+        self.store.execute_action({
+            "action": "checkout", "transactionType": "Return", "invoiceId": "CHILD",
+            "linkedInvoiceId": "PARENT", "client": {"name": "Customer"},
+            "items": [{"groupCode": "SKU-1", "unitImei": "UNIT-1", "finalPrice": 1000}],
+            "total": 1000,
+        }, actor_role="pos", device_id="test", operation_id="child-return")
+
+        with self.assertRaises(StoreError) as raised:
+            self.store.execute_action(
+                {"action": "delete_transaction", "invoiceId": "PARENT"},
+                actor_role="admin", device_id="test", operation_id="bad-parent-delete",
+            )
+        self.assertEqual(raised.exception.code, "invoice_has_dependents")
+        self.store.execute_action(
+            {"action": "delete_transaction", "invoiceId": "CHILD"},
+            actor_role="admin", device_id="test", operation_id="delete-child",
+        )
+        self.assertEqual(self.store.snapshot()["inventory"][0]["Quantity"], "1")
+        self.store.execute_action(
+            {"action": "delete_transaction", "invoiceId": "PARENT"},
+            actor_role="admin", device_id="test", operation_id="delete-parent",
+        )
+        self.assertEqual(self.store.snapshot()["inventory"][0]["Quantity"], "2")
+
+    def test_admin_can_delete_one_invoice_item_and_recalculate(self):
+        self.add_product()
+        self.store.execute_action({
+            "action": "checkout", "transactionType": "Sale", "invoiceId": "TWO-LINES",
+            "client": {"name": "Customer"},
+            "items": [
+                {"groupCode": "SKU-1", "unitImei": "UNIT-1", "finalPrice": 1000},
+                {"groupCode": "SKU-1", "unitImei": "UNIT-2", "finalPrice": 1000},
+            ],
+            "total": 2000,
+        }, actor_role="pos", device_id="test", operation_id="two-line-sale")
+        result = self.store.execute_action(
+            {"action": "delete_transaction_item", "invoiceId": "TWO-LINES", "unitCode": "UNIT-1"},
+            actor_role="admin", device_id="test", operation_id="delete-line",
+        )
+        transaction = result["data"]["transaction"]
+        self.assertEqual(transaction["total"], 1000)
+        self.assertEqual(len(transaction["normalizedItems"]), 1)
+        snapshot = self.store.snapshot()
+        self.assertEqual(snapshot["inventory"][0]["Quantity"], "1")
+
+    def test_partner_edit_updates_history_and_assigned_stock(self):
+        self.add_product(units=[
+            {"imei": "PARTNER-EDIT-UNIT", "supplier": "Supplier", "cost": 500, "status": "Available"}
+        ])
+        self.store.execute_action({
+            "action": "checkout", "transactionType": "Issue", "invoiceId": "PARTNER-EDIT",
+            "client": {"name": "Old Partner", "phone": "0771111111", "isPartner": True},
+            "items": [{"groupCode": "SKU-1", "unitImei": "PARTNER-EDIT-UNIT", "finalPrice": 1000}],
+            "total": 1000,
+        }, actor_role="wholesale", device_id="test", operation_id="partner-edit-issue")
+        client_id = self.store.snapshot()["clients"][0]["id"]
+        self.store.execute_action({
+            "action": "update_client", "clientId": client_id,
+            "client": {"name": "New Partner", "phone": "0772222222", "email": "new@example.com", "type": "B2B"},
+        }, actor_role="admin", device_id="test", operation_id="partner-update")
+        snapshot = self.store.snapshot()
+        self.assertEqual(snapshot["clients"][0]["name"], "New Partner")
+        self.assertEqual(snapshot["transactions"][0]["name"], "New Partner")
+        self.assertEqual(snapshot["inventory"][0]["Units"][0]["status"], "Partner:New Partner")
+
+    def test_partner_profile_delete_preserves_invoice_history(self):
+        self.add_product()
+        self.store.execute_action({
+            "action": "checkout", "transactionType": "Sale", "invoiceId": "PROFILE-HISTORY",
+            "client": {"name": "Profile Customer", "phone": "0773333333"},
+            "items": [{"groupCode": "SKU-1", "unitImei": "UNIT-1", "finalPrice": 1000}],
+            "total": 1000,
+        }, actor_role="pos", device_id="test", operation_id="profile-sale")
+        client_id = self.store.snapshot()["clients"][0]["id"]
+        result = self.store.execute_action(
+            {"action": "delete_client", "clientId": client_id},
+            actor_role="admin", device_id="test", operation_id="profile-delete",
+        )
+        self.assertEqual(result["data"]["historyPreserved"], 1)
+        snapshot = self.store.snapshot()
+        self.assertEqual(snapshot["clients"], [])
+        self.assertEqual(snapshot["transactions"][0]["invoiceId"], "PROFILE-HISTORY")
+
+    def test_inventory_units_and_products_delete_individually(self):
+        self.add_product()
+        self.store.execute_action(
+            {"action": "delete_item", "imei": "UNIT-1"},
+            actor_role="admin", device_id="test", operation_id="delete-unit",
+        )
+        snapshot = self.store.snapshot()
+        self.assertEqual(snapshot["inventory"][0]["Quantity"], "1")
+        self.assertEqual([unit["imei"] for unit in snapshot["inventory"][0]["Units"]], ["UNIT-2"])
+        self.store.execute_action(
+            {"action": "delete_item", "imei": "SKU-1"},
+            actor_role="admin", device_id="test", operation_id="delete-product",
+        )
+        self.assertEqual(self.store.snapshot()["inventory"], [])
+
+    def test_non_admin_cannot_delete_accounting_data(self):
+        self.add_product()
+        self.store.execute_action({
+            "action": "checkout", "transactionType": "Sale", "invoiceId": "ADMIN-ONLY",
+            "client": {"name": "Customer"},
+            "items": [{"groupCode": "SKU-1", "unitImei": "UNIT-1", "finalPrice": 1000}],
+            "total": 1000,
+        }, actor_role="pos", device_id="test", operation_id="admin-only-sale")
+        with self.assertRaises(StoreError) as raised:
+            self.store.execute_action(
+                {"action": "delete_transaction", "invoiceId": "ADMIN-ONLY"},
+                actor_role="pos", device_id="test", operation_id="pos-delete-attempt",
+            )
+        self.assertEqual(raised.exception.code, "forbidden")
+
 
 if __name__ == "__main__":
     unittest.main()

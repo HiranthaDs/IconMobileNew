@@ -111,6 +111,9 @@ def main() -> int:
             assert snapshot["data"]["clients"][0]["name"] == "Smoke Customer"
             _, invoice = request("/api/v1/invoices/SMOKE-INV")
             assert invoice["data"]["transaction"]["client"]["name"] == "Smoke Customer"
+            with urllib.request.urlopen(base + "/invoice.html?id=SMOKE-INV", timeout=5) as response:
+                invoice_page = response.read()
+                assert b"fetchInvoice" in invoice_page and b"invoiceId" in invoice_page
 
             with opener.open(base + "/api/v1/backup", timeout=15) as response:
                 backup = response.read()

@@ -12,6 +12,15 @@
     ? new BroadcastChannel("icon-mobile-lan-sync-v1")
     : null;
 
+  function isLoopbackHost(hostname) {
+    const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  }
+
+  function currentHostedOrigin() {
+    return /^https?:$/i.test(window.location.protocol) ? window.location.origin.replace(/\/$/, "") : "";
+  }
+
   let knownRevision = 0;
   let socket = null;
   let reconnectTimer = null;
@@ -19,7 +28,13 @@
   let pollTimer = null;
   let manuallyStopped = false;
   let snapshotRequest = null;
-  let shareBaseUrl = storageGet(SHARE_BASE_KEY, "") || window.location.origin;
+  // A public/reverse-proxy hostname must never be replaced by a private LAN IP.
+  // The LAN address is useful only when the host computer opened the app through
+  // localhost and needs to share a link with another device on the same network.
+  const runtimeOrigin = currentHostedOrigin();
+  let shareBaseUrl = isLoopbackHost(window.location.hostname)
+    ? (storageGet(SHARE_BASE_KEY, "") || runtimeOrigin)
+    : runtimeOrigin;
 
   function storageGet(key, fallback) {
     try {
@@ -146,9 +161,12 @@
       data: snapshot
     };
     knownRevision = Math.max(knownRevision, envelope.revision);
-    if (snapshot.lanBaseUrl) {
+    if (snapshot.lanBaseUrl && isLoopbackHost(window.location.hostname)) {
       shareBaseUrl = String(snapshot.lanBaseUrl).replace(/\/$/, "");
       storageSet(SHARE_BASE_KEY, shareBaseUrl);
+    } else if (runtimeOrigin) {
+      shareBaseUrl = runtimeOrigin;
+      storageSet(SHARE_BASE_KEY, runtimeOrigin);
     }
     return storageSet(SNAPSHOT_KEY, JSON.stringify(envelope));
   }
@@ -170,7 +188,11 @@
 
   function getShareUrl(path) {
     const suffix = String(path || "");
-    const base = (shareBaseUrl || window.location.origin).replace(/\/$/, "");
+    const base = (
+      isLoopbackHost(window.location.hostname)
+        ? (shareBaseUrl || runtimeOrigin)
+        : runtimeOrigin
+    ).replace(/\/$/, "");
     return `${base}${suffix.startsWith("/") ? suffix : `/${suffix}`}`;
   }
 

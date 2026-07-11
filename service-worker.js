@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "icon-mobile-shell-v5";
+const CACHE_NAME = "icon-mobile-shell-v6";
 const SHELL_FILES = [
   "/",
   "/index.html",

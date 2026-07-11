@@ -566,10 +566,13 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
             );
         };
 
-        const ClientsView = ({ clients, setView, onLogout }) => {
+        const ClientsView = ({ clients, contacts, setView, onLogout, onRefresh }) => {
             const [search, setSearch] = useState("");
             const [selectedClient, setSelectedClient] = useState(null);
             const [toastMsg, setToastMsg] = useState("");
+            const [partnerMode, setPartnerMode] = useState(false);
+            const [editingPartner, setEditingPartner] = useState(null);
+            const [busy, setBusy] = useState(false);
 
             const [dateFilter, setDateFilter] = useState("all");
             const [typeFilter, setTypeFilter] = useState("all");
@@ -624,6 +627,14 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                 return result;
             }, [clients, search, dateFilter, typeFilter, customStart, customEnd]);
 
+            const partnerFiltered = useMemo(() => {
+                const terms = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
+                return (contacts || []).filter(contact => contact.type === 'B2B').filter(contact => {
+                    const text = `${contact.name} ${contact.phone} ${contact.email}`.toLowerCase();
+                    return terms.every(term => text.includes(term));
+                });
+            }, [contacts, search]);
+
             const copyInvoiceLink = (id) => {
                 const link = window.IconAPI.getShareUrl(`/invoice.html?id=${encodeURIComponent(id || '')}`);
                 navigator.clipboard.writeText(link).then(() => showToast(`✅ Invoice link copied!`));
@@ -638,13 +649,69 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                 window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`, '_blank');
             };
 
+            const deleteInvoice = async (invoiceId) => {
+                if (!window.confirm(`Delete invoice ${invoiceId}?\n\nThe system will reverse its stock movement. Linked returns or payments must be deleted first.`)) return;
+                setBusy(true);
+                try {
+                    const result = await window.IconAPI.action({ action: 'delete_transaction', invoiceId });
+                    if (!result?.success) throw new Error(result?.message || 'Invoice deletion failed.');
+                    setSelectedClient(null);
+                    await onRefresh();
+                    showToast(`Invoice ${invoiceId} deleted safely.`);
+                } catch (error) { showToast(error?.message || String(error)); }
+                finally { setBusy(false); }
+            };
+
+            const deleteInvoiceItem = async (invoiceId, unitCode) => {
+                if (!unitCode) { showToast('This older item has no unit code and cannot be deleted separately.'); return; }
+                if (!window.confirm(`Delete item ${unitCode} from invoice ${invoiceId}?\n\nStock and invoice totals will be corrected automatically.`)) return;
+                setBusy(true);
+                try {
+                    const result = await window.IconAPI.action({ action: 'delete_transaction_item', invoiceId, unitCode });
+                    if (!result?.success) throw new Error(result?.message || 'Invoice item deletion failed.');
+                    setSelectedClient(result.data.transaction);
+                    await onRefresh();
+                    showToast(`Item ${unitCode} deleted from the invoice.`);
+                } catch (error) { showToast(error?.message || String(error)); }
+                finally { setBusy(false); }
+            };
+
+            const savePartner = async (event) => {
+                event.preventDefault();
+                if (!editingPartner?.name?.trim()) { showToast('Partner name is required.'); return; }
+                setBusy(true);
+                try {
+                    const result = await window.IconAPI.action({
+                        action: 'update_client', clientId: editingPartner.id,
+                        client: { name: editingPartner.name.trim(), phone: editingPartner.phone.trim(), email: editingPartner.email.trim(), type: 'B2B' }
+                    });
+                    if (!result?.success) throw new Error(result?.message || 'Partner update failed.');
+                    setEditingPartner(null);
+                    await onRefresh();
+                    showToast('Partner details updated everywhere.');
+                } catch (error) { showToast(error?.message || String(error)); }
+                finally { setBusy(false); }
+            };
+
+            const deletePartner = async (partner) => {
+                if (!window.confirm(`Delete partner profile "${partner.name}"?\n\nHistorical invoices will remain. The profile cannot be deleted while the partner holds stock.`)) return;
+                setBusy(true);
+                try {
+                    const result = await window.IconAPI.action({ action: 'delete_client', clientId: partner.id });
+                    if (!result?.success) throw new Error(result?.message || 'Partner deletion failed.');
+                    await onRefresh();
+                    showToast(`Partner deleted. ${result.data.historyPreserved || 0} historical records preserved.`);
+                } catch (error) { showToast(error?.message || String(error)); }
+                finally { setBusy(false); }
+            };
+
             return (
                 <div className="flex flex-col h-full w-full">
                     {/* Admin Header with Navigation */}
                     <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 shrink-0 z-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center shadow-sm">
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 bg-gray-100 text-gray-900 rounded-xl flex items-center justify-center shrink-0"><Icons.Users /></div>
-                            <div><h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">Client Database</h1><p className="text-[11px] font-medium text-gray-500">Manage customers and view past orders.</p></div>
+                            <div><h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">Clients &amp; Partners</h1><p className="text-[11px] font-medium text-gray-500">Manage partner profiles, invoices, and individual invoice items.</p></div>
                         </div>
                         <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
                             <div className="flex p-1 bg-gray-100 rounded-xl shrink-0 border border-gray-200 self-center overflow-x-auto">
@@ -666,10 +733,10 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                         <div className="flex flex-col xl:flex-row xl:items-center gap-4 mb-6 bg-white p-4 rounded-3xl shadow-sm border border-gray-200">
                             <div className="relative flex-1 min-w-[250px]">
                                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"><Icons.Search /></span>
-                                <input type="text" placeholder="Smart Search Clients & Orders..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full bg-gray-50 border border-gray-200 pl-11 pr-4 py-2.5 rounded-2xl focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 text-sm transition-all" />
+                                <input type="text" placeholder={partnerMode ? "Search partner name, phone or email..." : "Smart Search Clients & Orders..."} value={search} onChange={e=>setSearch(e.target.value)} className="w-full bg-gray-50 border border-gray-200 pl-11 pr-4 py-2.5 rounded-2xl focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 text-sm transition-all" />
                             </div>
                             
-                            <div className="flex flex-wrap items-center gap-3">
+                            {!partnerMode && <div className="flex flex-wrap items-center gap-3">
                                 <div className="flex items-center bg-gray-50 p-1.5 rounded-2xl border border-gray-200">
                                     <div className="text-gray-400 pl-2 pr-1"><Icons.Filter /></div>
                                     <select className="bg-transparent text-sm font-semibold text-gray-700 outline-none py-1.5 pr-2 cursor-pointer" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
@@ -691,14 +758,41 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                         <input type="date" className="bg-white border border-blue-200 text-blue-700 rounded-xl py-1.5 px-3 text-xs font-bold outline-none" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} />
                                     </div>
                                 )}
-                            </div>
+                            </div>}
                         </div>
                         
                         <div className="flex justify-between items-center mb-4 px-2">
-                            <h3 className="text-sm font-bold text-gray-700">Showing {filtered.length} Records</h3>
+                            <h3 className="text-sm font-bold text-gray-700">Showing {partnerMode ? partnerFiltered.length : filtered.length} Records</h3>
+                            <div className="flex p-1 bg-gray-100 border border-gray-200 rounded-xl">
+                                <button type="button" onClick={() => setPartnerMode(false)} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!partnerMode ? 'bg-white text-black shadow-sm' : 'text-gray-500'}`}>Transactions</button>
+                                <button type="button" onClick={() => setPartnerMode(true)} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${partnerMode ? 'bg-white text-black shadow-sm' : 'text-gray-500'}`}>Partner Directory</button>
+                            </div>
                         </div>
 
-                        <div className="flex-1 bg-white border border-gray-200 rounded-2xl overflow-hidden flex flex-col shadow-sm">
+                        {partnerMode && <div className="flex-1 bg-white border border-gray-200 rounded-2xl overflow-hidden flex flex-col shadow-sm">
+                            <div className="overflow-x-auto flex-1">
+                                <table className="w-full text-left border-collapse whitespace-nowrap">
+                                    <thead className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-500 font-bold sticky top-0 z-10 shadow-sm">
+                                        <tr><th className="px-6 py-4 border-b">Partner</th><th className="px-6 py-4 border-b">Phone</th><th className="px-6 py-4 border-b">Email</th><th className="px-6 py-4 border-b">Last Updated</th><th className="px-6 py-4 border-b text-right">Actions</th></tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 text-sm">
+                                        {partnerFiltered.map(partner => <tr key={partner.id} className="hover:bg-gray-50">
+                                            <td className="px-6 py-4 font-bold text-gray-900">{partner.name}</td>
+                                            <td className="px-6 py-4 text-gray-700">{partner.phone || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-500">{partner.email || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-500">{partner.updatedAt ? new Date(partner.updatedAt).toLocaleString() : '-'}</td>
+                                            <td className="px-6 py-4 text-right space-x-2">
+                                                <button type="button" disabled={busy} onClick={() => setEditingPartner({...partner, phone: partner.phone || '', email: partner.email || ''})} className="pro-button secondary px-3 py-1.5 text-xs"><Icons.Edit /> Edit</button>
+                                                <button type="button" disabled={busy} onClick={() => deletePartner(partner)} className="pro-button secondary px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"><Icons.Trash /> Delete</button>
+                                            </td>
+                                        </tr>)}
+                                        {partnerFiltered.length === 0 && <tr><td colSpan="5" className="px-6 py-16 text-center text-gray-500">No partner profiles match your search.</td></tr>}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>}
+
+                        <div className={`${partnerMode ? 'hidden' : 'flex'} flex-1 bg-white border border-gray-200 rounded-2xl overflow-hidden flex-col shadow-sm`}>
                             <div className="overflow-x-auto flex-1">
                                 <table className="w-full text-left border-collapse whitespace-nowrap">
                                     <thead className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-500 font-bold sticky top-0 z-10 shadow-sm">
@@ -738,20 +832,21 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                         {selectedClient && (
                             <div className="fixed inset-0 glass-overlay z-[70] flex items-center justify-center p-4">
                                 <div className="bg-white w-full max-w-4xl rounded-[24px] shadow-2xl flex flex-col max-h-[85vh] overflow-hidden border border-gray-200">
-                                    <div className="px-8 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                                    <div className="px-5 sm:px-8 py-5 border-b border-gray-100 flex flex-col sm:flex-row gap-3 justify-between sm:items-center bg-gray-50 shrink-0">
                                         <div className="flex items-center gap-3">
                                             <h3 className="font-bold text-lg text-gray-900">Transaction Details</h3>
                                             <span className="bg-gray-200 text-black px-2 py-0.5 rounded text-sm font-mono border border-gray-300">{selectedClient.invoiceId}</span>
                                         </div>
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex flex-wrap items-center gap-2">
                                             <button type="button" onClick={() => copyInvoiceLink(selectedClient.invoiceId)} className="pro-button secondary px-3 py-1.5 text-xs text-gray-600"><Icons.Link /> Copy Link</button>
                                             <button type="button" onClick={() => shareWhatsApp(selectedClient)} className="pro-button primary px-3 py-1.5 text-xs bg-[#25D366] hover:bg-[#128C7E] border-transparent"><Icons.WhatsApp /> Share</button>
+                                            <button type="button" disabled={busy} onClick={() => deleteInvoice(selectedClient.invoiceId)} className="pro-button secondary px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"><Icons.Trash /> Delete Invoice</button>
                                             <button type="button" onClick={() => setSelectedClient(null)} className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-300 ml-2">✕</button>
                                         </div>
                                     </div>
                                     
                                     <div className="p-8 overflow-y-auto flex-1 bg-gray-50/30">
-                                        <div className="grid grid-cols-3 gap-6 mb-8">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                                             <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
                                                 <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400 mb-1.5">Client / Partner</p>
                                                 <p className="font-bold text-gray-900 text-lg leading-tight mb-1">{selectedClient.name}</p>
@@ -774,7 +869,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                         <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
                                             <table className="w-full text-left text-sm">
                                                 <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 text-[10px] uppercase tracking-wider">
-                                                    <tr><th className="px-5 py-3 font-bold w-[30%]">Item</th><th className="px-5 py-3 font-bold w-[20%]">ID</th><th className="px-5 py-3 font-bold w-[35%]">Warranty Status</th><th className="px-5 py-3 font-bold text-right w-[15%]">Price</th></tr>
+                                                    <tr><th className="px-5 py-3 font-bold w-[28%]">Item</th><th className="px-5 py-3 font-bold w-[20%]">ID</th><th className="px-5 py-3 font-bold w-[30%]">Warranty Status</th><th className="px-5 py-3 font-bold text-right w-[14%]">Price</th><th className="px-5 py-3 font-bold text-right w-[8%]">Action</th></tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {selectedClient.purchasedItems && selectedClient.purchasedItems.length > 0 ? (
@@ -824,17 +919,40 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                                                             <span>LKR {finalSellingPrice.toLocaleString()}</span>
                                                                         )}
                                                                     </td>
+                                                                    <td className="px-5 py-4 align-top text-right">
+                                                                        <button type="button" disabled={busy} title="Delete this invoice item" onClick={() => deleteInvoiceItem(selectedClient.invoiceId, item.unitImei || item.displayImei || item["IMEI or Item Code"])} className="p-2 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-40"><Icons.Trash /></button>
+                                                                    </td>
                                                                 </tr>
                                                             );
                                                         })
                                                     ) : (
-                                                        <tr><td colSpan="4" className="p-8 text-center text-gray-500">No detailed item records found for this older invoice.</td></tr>
+                                                        <tr><td colSpan="5" className="p-8 text-center text-gray-500">No detailed item records found for this older invoice.</td></tr>
                                                     )}
                                                 </tbody>
                                             </table>
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {editingPartner && (
+                            <div className="fixed inset-0 glass-overlay z-[80] flex items-center justify-center p-4">
+                                <form onSubmit={savePartner} className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-gray-200 overflow-hidden">
+                                    <div className="px-6 py-5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                                        <div><h3 className="font-bold text-lg text-gray-900">Edit Partner Details</h3><p className="text-xs text-gray-500 mt-1">Changes update linked invoices and assigned stock labels.</p></div>
+                                        <button type="button" onClick={() => setEditingPartner(null)} className="w-8 h-8 rounded-full bg-gray-200 text-gray-600">✕</button>
+                                    </div>
+                                    <div className="p-6 space-y-4">
+                                        <label className="block"><span className="text-[10px] uppercase tracking-widest font-bold text-gray-500">Partner Name</span><input required value={editingPartner.name} onChange={e => setEditingPartner({...editingPartner, name: e.target.value})} className="pro-input mt-1.5 w-full px-4 py-3 border border-gray-200 rounded-xl" /></label>
+                                        <label className="block"><span className="text-[10px] uppercase tracking-widest font-bold text-gray-500">Phone / WhatsApp</span><input value={editingPartner.phone} onChange={e => setEditingPartner({...editingPartner, phone: e.target.value})} className="pro-input mt-1.5 w-full px-4 py-3 border border-gray-200 rounded-xl" /></label>
+                                        <label className="block"><span className="text-[10px] uppercase tracking-widest font-bold text-gray-500">Email</span><input type="email" value={editingPartner.email} onChange={e => setEditingPartner({...editingPartner, email: e.target.value})} className="pro-input mt-1.5 w-full px-4 py-3 border border-gray-200 rounded-xl" /></label>
+                                    </div>
+                                    <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+                                        <button type="button" onClick={() => setEditingPartner(null)} className="pro-button secondary px-4 py-2 text-sm">Cancel</button>
+                                        <button type="submit" disabled={busy} className="pro-button black-btn px-5 py-2 text-sm disabled:opacity-50">{busy ? 'Saving…' : 'Save Partner'}</button>
+                                    </div>
+                                </form>
                             </div>
                         )}
                     </div>
@@ -855,6 +973,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
             const [view, setView] = useState('list'); 
             const [inventory, setInventory] = useState([]);
             const [clients, setClients] = useState([]);
+            const [contacts, setContacts] = useState([]);
             const [assetSummary, setAssetSummary] = useState(null);
             const [loading, setLoading] = useState(false);
             const [loginLoading, setLoginLoading] = useState(false);
@@ -970,8 +1089,10 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                     const snapshotData = snapshot.data;
                     const invData = Array.isArray(snapshotData.inventory) ? snapshotData.inventory : [];
                     const transactionData = Array.isArray(snapshotData.transactions) ? snapshotData.transactions : [];
+                    const contactData = Array.isArray(snapshotData.clients) ? snapshotData.clients : [];
                     setInventory([...invData]);
                     setClients([...transactionData]);
+                    setContacts([...contactData]);
                     setAssetSummary(snapshotData.assets && typeof snapshotData.assets === 'object' ? {...snapshotData.assets} : null);
                     adminSafeStorage.set(ADMIN_DATA_CACHE_KEY, JSON.stringify({ ...snapshotData, savedAt: Date.now() }));
                     if (!silent) showToast(`Local SQLite: ${invData.length} inventory records loaded.`);
@@ -982,6 +1103,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                         if (!cached || !Array.isArray(cached.inventory)) throw new Error('No usable cache found.');
                         setInventory([...cached.inventory]);
                         setClients([...(Array.isArray(cached.transactions) ? cached.transactions : [])]);
+                        setContacts([...(Array.isArray(cached.clients) ? cached.clients : [])]);
                         setAssetSummary(cached.assets && typeof cached.assets === 'object' ? {...cached.assets} : null);
                         if (!silent) showToast('LAN server unavailable. Showing read-only cached data.');
                     } catch (cacheErr) {
@@ -1381,6 +1503,33 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                 setActionLoading(false);
             };
 
+            const handleDeleteInventory = async (item) => {
+                const code = item?.IMEI;
+                if (!code || !window.confirm(`Delete the complete inventory product ${code}?\n\nOnly available/returned units can be deleted. Sold or partner-assigned units are protected.`)) return;
+                setActionLoading(true);
+                try {
+                    const result = await window.IconAPI.action({ action: 'delete_item', imei: code });
+                    if (!result?.success) throw new Error(result?.message || 'Inventory deletion failed.');
+                    await fetchData(true);
+                    showToast(`Inventory product ${code} deleted.`);
+                } catch (error) { showToast(error?.message || String(error)); }
+                finally { setActionLoading(false); }
+            };
+
+            const handleDeleteUnit = async (unit) => {
+                const code = unit?.imei;
+                if (!code || !window.confirm(`Delete inventory unit ${code}?\n\nThis permanently removes only this unit from active stock.`)) return;
+                setActionLoading(true);
+                try {
+                    const result = await window.IconAPI.action({ action: 'delete_item', imei: code });
+                    if (!result?.success) throw new Error(result?.message || 'Unit deletion failed.');
+                    setDetailsModalItem(null);
+                    await fetchData(true);
+                    showToast(`Inventory unit ${code} deleted.`);
+                } catch (error) { showToast(error?.message || String(error)); }
+                finally { setActionLoading(false); }
+            };
+
             if (!isLoggedIn) {
                 return (
                     <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center p-4">
@@ -1547,7 +1696,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                 );
             }
 
-            if (view === 'clients') { return (<div className="h-screen bg-[#f3f4f6] flex flex-col relative overflow-hidden print-hide"><ClientsView clients={clients} setView={setView} onLogout={handleLogout} /></div>); }
+            if (view === 'clients') { return (<div className="h-screen bg-[#f3f4f6] flex flex-col relative overflow-hidden print-hide"><ClientsView clients={clients} contacts={contacts} setView={setView} onLogout={handleLogout} onRefresh={() => fetchData(true)} /></div>); }
 
             if (view === 'stockReport') {
                 return (
@@ -1690,6 +1839,9 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                                                 <button onClick={() => handleEditClick(item)} className="p-1.5 text-gray-400 hover:text-black hover:bg-gray-100 rounded-lg transition-colors inline-flex items-center gap-1.5">
                                                                     <Icons.Edit /> <span className="text-[11px] font-bold hidden sm:inline">Edit</span>
                                                                 </button>
+                                                                <button type="button" disabled={actionLoading} onClick={() => handleDeleteInventory(item)} className="p-1.5 ml-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors inline-flex items-center gap-1.5 disabled:opacity-40">
+                                                                    <Icons.Trash /> <span className="text-[11px] font-bold hidden sm:inline">Delete</span>
+                                                                </button>
                                                             </td>
                                                         </tr>
                                                     )
@@ -1719,7 +1871,8 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                                     <th className="px-4 py-3">Supplier</th>
                                                     <th className="px-4 py-3 text-right">Cost (LKR)</th>
                                                     <th className="px-4 py-3 text-center">Date Added</th>
-                                                    <th className="px-4 py-3 text-right rounded-r-lg">Status</th>
+                                                    <th className="px-4 py-3 text-right">Status</th>
+                                                    <th className="px-4 py-3 text-right rounded-r-lg">Action</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
@@ -1740,11 +1893,14 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                                                     {isPartner ? String(u.status).replace('Partner:', 'P:') : u.status}
                                                                 </span>
                                                             </td>
+                                                            <td className="px-4 py-3 text-right">
+                                                                <button type="button" disabled={actionLoading || !['Available','Returned'].includes(u.status)} onClick={() => handleDeleteUnit(u)} title={['Available','Returned'].includes(u.status) ? 'Delete this unit' : 'Sold and partner units are protected'} className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:text-gray-300 disabled:hover:bg-transparent"><Icons.Trash /></button>
+                                                            </td>
                                                         </tr>
                                                     );
                                                 })}
                                                 {(!detailsModalItem.Units || detailsModalItem.Units.length === 0) && (
-                                                    <tr><td colSpan="5" className="p-8 text-center text-gray-500 italic">No detailed unit data available for this item.</td></tr>
+                                                    <tr><td colSpan="6" className="p-8 text-center text-gray-500 italic">No detailed unit data available for this item.</td></tr>
                                                 )}
                                             </tbody>
                                         </table>

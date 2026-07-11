@@ -582,6 +582,15 @@ class SQLiteStore:
         value.setdefault("transactionType", row["transaction_type"])
         value.setdefault("date", row["created_at"])
         value.setdefault("revision", row["revision"])
+        value.setdefault("clientId", row["client_id"])
+        value.setdefault("name", row["client_name"])
+        value.setdefault("phone", row["client_phone"])
+        value.setdefault("email", row["client_email"])
+        value.setdefault("paymentMethod", row["payment_method"])
+        value.setdefault("subTotal", cents_to_legacy(row["subtotal_cents"]))
+        value.setdefault("discount", cents_to_legacy(row["discount_cents"]))
+        value.setdefault("total", cents_to_legacy(row["total_cents"]))
+        value.setdefault("totalPrice", cents_to_legacy(row["total_cents"]))
         # Normalized rows are the accounting source of truth.  Enrich legacy-shaped
         # browser payloads with the committed unit cost so every screen calculates
         # profit from the same values, including transactions created by older builds.
@@ -973,15 +982,22 @@ class SQLiteStore:
             "addInventory": "add_item", "addProduct": "add_item",
             "updateInventory": "update_item", "updateProduct": "update_item",
             "deleteInventory": "delete_item", "deleteProduct": "delete_item",
+            "deleteInvoice": "delete_transaction", "deleteInvoiceItem": "delete_transaction_item",
+            "updatePartner": "update_client", "deletePartner": "delete_client",
             "sale": "checkout", "issue": "checkout", "return": "checkout",
         }
         action = aliases.get(action, action)
-        if action not in {"add_item", "update_item", "delete_item", "checkout"}:
+        if action not in {
+            "add_item", "update_item", "delete_item", "checkout",
+            "delete_transaction", "delete_transaction_item", "update_client", "delete_client",
+        }:
             raise StoreError(400, "unknown_action", f"Unsupported action '{action}'")
         if actor_role not in {"pos", "admin", "wholesale"}:
             raise StoreError(403, "forbidden", "Invalid application role")
         if action == "delete_item" and actor_role not in {"admin", "wholesale"}:
             raise StoreError(403, "forbidden", "This role cannot delete inventory")
+        if action in {"delete_transaction", "delete_transaction_item", "update_client", "delete_client"} and actor_role != "admin":
+            raise StoreError(403, "forbidden", "Only an administrator can change accounting or partner master data")
 
         operation_id = clean_text(operation_id or str(uuid.uuid4()), maximum=180)
         device_id = clean_text(device_id or "unknown-device", maximum=180)
@@ -1045,6 +1061,30 @@ class SQLiteStore:
                     message = "Inventory item deleted."
                     data = {"revision": revision, "deletedCode": entity_id}
                     entity_type = "inventory"
+                elif action == "delete_transaction":
+                    result = self._delete_transaction(conn, payload, revision=revision)
+                    entity_id = result["invoiceId"]
+                    message = "Invoice deleted and its stock movement was reversed."
+                    data = {"revision": revision, **result}
+                    entity_type = "transaction"
+                elif action == "delete_transaction_item":
+                    result = self._delete_transaction_item(conn, payload, revision=revision)
+                    entity_id = f"{result['invoiceId']}:{result['unitCode']}"
+                    message = "Invoice item deleted and totals were recalculated."
+                    data = {"revision": revision, **result}
+                    entity_type = "transaction_item"
+                elif action == "update_client":
+                    result = self._update_client(conn, payload, revision=revision)
+                    entity_id = str(result["id"])
+                    message = "Partner details updated across linked records."
+                    data = {"revision": revision, "client": result}
+                    entity_type = "client"
+                elif action == "delete_client":
+                    result = self._delete_client(conn, payload, revision=revision)
+                    entity_id = str(result["clientId"])
+                    message = "Partner profile deleted; historical invoices were preserved."
+                    data = {"revision": revision, **result}
+                    entity_type = "client"
                 else:
                     transaction_type = clean_text(payload.get("transactionType") or payload.get("txn_type") or "Sale", maximum=80)
                     if transaction_type not in TRANSACTION_TYPES:
@@ -1187,6 +1227,289 @@ class SQLiteStore:
             (now, revision, product["id"]),
         )
         return product["sku"]
+
+    @staticmethod
+    def _client_id_from_payload(payload: Mapping[str, Any]) -> int:
+        client_id = safe_int(first_value(payload, ["clientId", "client_id", "id"], 0), 0, minimum=0)
+        if not client_id:
+            raise StoreError(422, "missing_client_id", "Partner ID is required")
+        return client_id
+
+    def _update_client(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> dict:
+        client_id = self._client_id_from_payload(payload)
+        current = conn.execute("SELECT * FROM v2_clients WHERE id=?", (client_id,)).fetchone()
+        if not current:
+            raise StoreError(404, "client_not_found", "Partner profile was not found")
+
+        details = payload.get("client") if isinstance(payload.get("client"), Mapping) else payload
+        name = clean_text(first_value(details, ["name", "partnerName"], current["name"]), maximum=220)
+        phone = clean_text(first_value(details, ["phone", "whatsapp"], current["phone"]), maximum=80)
+        email = clean_text(details.get("email", current["email"]), maximum=240)
+        client_type = clean_text(first_value(details, ["type", "clientType"], current["client_type"]), maximum=20)
+        client_type = "B2B" if client_type.casefold() in {"b2b", "partner", "wholesale"} else "Retail"
+        if not name:
+            raise StoreError(422, "missing_client", "Partner name is required")
+
+        key = self._client_identity_key(name, phone, email)
+        collision = conn.execute(
+            "SELECT id FROM v2_clients WHERE client_key=? COLLATE NOCASE AND id<>?", (key, client_id)
+        ).fetchone()
+        if collision:
+            raise StoreError(409, "duplicate_client", "Another client already uses these contact details")
+
+        now = utc_now()
+        old_name = current["name"]
+        conn.execute(
+            "UPDATE v2_clients SET client_key=?,name=?,phone=?,email=?,client_type=?,updated_at=?,revision=? WHERE id=?",
+            (key, name, phone, email, client_type, now, revision, client_id),
+        )
+        if old_name.casefold() != name.casefold():
+            conn.execute(
+                "UPDATE v2_units SET status=?,updated_at=?,revision=? WHERE deleted=0 AND lower(status)=lower(?)",
+                (f"{_PARTNER_PREFIX}{name}", now, revision, f"{_PARTNER_PREFIX}{old_name}"),
+            )
+
+        transactions = conn.execute(
+            "SELECT id,raw_json FROM v2_transactions WHERE client_id=?", (client_id,)
+        ).fetchall()
+        for transaction in transactions:
+            raw = json_object(transaction["raw_json"])
+            raw_client = raw.get("client") if isinstance(raw.get("client"), dict) else {}
+            raw_client.update({"name": name, "phone": phone, "email": email})
+            if client_type == "B2B":
+                raw_client["isPartner"] = True
+                raw_client["partnerType"] = "B2B_PARTNER"
+            raw["client"] = raw_client
+            raw.update({"name": name, "phone": phone, "email": email, "revision": revision})
+            conn.execute(
+                "UPDATE v2_transactions SET client_name=?,client_phone=?,client_email=?,raw_json=?,revision=? WHERE id=?",
+                (name, phone, email, canonical_json(raw), revision, transaction["id"]),
+            )
+
+        updated = conn.execute("SELECT * FROM v2_clients WHERE id=?", (client_id,)).fetchone()
+        return self._client_to_dict(updated)
+
+    def _delete_client(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> dict:
+        client_id = self._client_id_from_payload(payload)
+        client = conn.execute("SELECT * FROM v2_clients WHERE id=?", (client_id,)).fetchone()
+        if not client:
+            raise StoreError(404, "client_not_found", "Partner profile was not found")
+        assigned = conn.execute(
+            "SELECT unit_code FROM v2_units WHERE deleted=0 AND lower(status)=lower(?) LIMIT 1",
+            (f"{_PARTNER_PREFIX}{client['name']}",),
+        ).fetchone()
+        if assigned:
+            raise StoreError(
+                409, "partner_has_stock",
+                f"Partner still holds unit '{assigned['unit_code']}'. Return or reassign partner stock before deleting the profile.",
+            )
+        history_count = int(conn.execute(
+            "SELECT COUNT(*) FROM v2_transactions WHERE client_id=?", (client_id,)
+        ).fetchone()[0])
+        # Accounting records remain immutable evidence. Removing a master profile
+        # detaches those records while retaining their invoice-time contact snapshot.
+        conn.execute("UPDATE v2_transactions SET client_id=NULL WHERE client_id=?", (client_id,))
+        conn.execute("DELETE FROM v2_clients WHERE id=?", (client_id,))
+        return {"clientId": client_id, "name": client["name"], "historyPreserved": history_count}
+
+    @staticmethod
+    def _transaction_destination(conn: sqlite3.Connection, transaction: sqlite3.Row) -> str:
+        if transaction["transaction_type"] == "Sale":
+            return "Sold"
+        if transaction["transaction_type"] == "Issue":
+            return f"{_PARTNER_PREFIX}{transaction['client_name']}"
+        if transaction["transaction_type"] == "Return":
+            linked_id = transaction["linked_invoice_id"]
+            if not linked_id:
+                raise StoreError(
+                    409, "return_origin_unknown",
+                    "This return has no linked invoice, so its stock movement cannot be reversed safely.",
+                )
+            linked = conn.execute(
+                "SELECT * FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (linked_id,)
+            ).fetchone()
+            if not linked or linked["transaction_type"] not in {"Sale", "Issue"}:
+                raise StoreError(409, "return_origin_unknown", "The original sale or issue could not be found")
+            return "Sold" if linked["transaction_type"] == "Sale" else f"{_PARTNER_PREFIX}{linked['client_name']}"
+        return ""
+
+    def _validate_transaction_unit_reversal(
+        self, conn: sqlite3.Connection, transaction: sqlite3.Row, item: sqlite3.Row
+    ) -> str:
+        if not item["unit_id"]:
+            return ""
+        unit = conn.execute("SELECT * FROM v2_units WHERE id=? AND deleted=0", (item["unit_id"],)).fetchone()
+        if not unit:
+            raise StoreError(409, "unit_missing", f"Unit '{item['unit_code']}' is no longer active")
+        if transaction["transaction_type"] in {"Sale", "Issue"}:
+            expected = self._transaction_destination(conn, transaction)
+            if unit["status"].casefold() != expected.casefold():
+                raise StoreError(
+                    409, "stock_history_conflict",
+                    f"Unit '{unit['unit_code']}' is currently {unit['status']}; expected {expected}. Delete linked returns first.",
+                )
+            return "Available"
+        if transaction["transaction_type"] == "Return":
+            if unit["status"] != "Available":
+                raise StoreError(
+                    409, "stock_history_conflict",
+                    f"Returned unit '{unit['unit_code']}' is currently {unit['status']} and cannot be reversed.",
+                )
+            return self._transaction_destination(conn, transaction)
+        return ""
+
+    def _dependent_transaction(self, conn: sqlite3.Connection, invoice_id: str) -> Optional[sqlite3.Row]:
+        return conn.execute(
+            "SELECT invoice_id,transaction_type FROM v2_transactions "
+            "WHERE linked_invoice_id=? COLLATE NOCASE ORDER BY id LIMIT 1",
+            (invoice_id,),
+        ).fetchone()
+
+    def _delete_transaction(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> dict:
+        invoice_id = clean_text(first_value(payload, ["invoiceId", "invoice_id", "id"], ""), maximum=180)
+        if not invoice_id:
+            raise StoreError(422, "missing_invoice_id", "Invoice ID is required")
+        transaction = conn.execute(
+            "SELECT * FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (invoice_id,)
+        ).fetchone()
+        if not transaction:
+            raise StoreError(404, "invoice_not_found", f"Invoice '{invoice_id}' was not found")
+        dependent = self._dependent_transaction(conn, transaction["invoice_id"])
+        if dependent:
+            raise StoreError(
+                409, "invoice_has_dependents",
+                f"Delete linked {dependent['transaction_type']} '{dependent['invoice_id']}' before deleting this invoice.",
+            )
+
+        items = conn.execute(
+            "SELECT * FROM v2_transaction_items WHERE transaction_id=? ORDER BY id", (transaction["id"],)
+        ).fetchall()
+        changes = [(item, self._validate_transaction_unit_reversal(conn, transaction, item)) for item in items]
+        touched_products: set[int] = set()
+        now = utc_now()
+        for item, target in changes:
+            if item["unit_id"] and target:
+                conn.execute(
+                    "UPDATE v2_units SET status=?,updated_at=?,revision=? WHERE id=?",
+                    (target, now, revision, item["unit_id"]),
+                )
+            if item["product_id"]:
+                touched_products.add(int(item["product_id"]))
+        conn.execute("DELETE FROM v2_transaction_items WHERE transaction_id=?", (transaction["id"],))
+        conn.execute("DELETE FROM v2_operation_receipts WHERE invoice_id=? COLLATE NOCASE", (transaction["invoice_id"],))
+        conn.execute("DELETE FROM v2_transactions WHERE id=?", (transaction["id"],))
+        for product_id in touched_products:
+            self._refresh_product(conn, product_id, revision)
+        return {"invoiceId": transaction["invoice_id"], "reversedUnits": len(changes)}
+
+    @staticmethod
+    def _remove_unit_from_raw_lines(lines: Any, unit_code: str) -> list:
+        if not isinstance(lines, list):
+            return []
+        target = unit_code.casefold()
+        updated: list = []
+        for raw_line in lines:
+            if not isinstance(raw_line, dict):
+                continue
+            line = dict(raw_line)
+            allocated = [str(code) for code in line.get("allocatedUnits", []) if str(code).strip()]
+            direct = clean_text(first_value(
+                line, ["unitImei", "displayImei", "IMEI", "IMEI or Item Code"], ""
+            ), maximum=180)
+            matched = any(code.casefold() == target for code in allocated) or direct.casefold() == target
+            if not matched:
+                updated.append(line)
+                continue
+            remaining = [code for code in allocated if code.casefold() != target]
+            quantity = safe_int(first_value(line, ["cartQty", "Quantity", "qty"], len(allocated) or 1), 1, minimum=1)
+            if quantity <= 1 or (allocated and not remaining):
+                continue
+            line["allocatedUnits"] = remaining
+            line["cartQty"] = quantity - 1
+            if remaining:
+                for key in ("unitImei", "displayImei", "IMEI", "IMEI or Item Code"):
+                    if key in line:
+                        line[key] = remaining[0]
+            updated.append(line)
+        return updated
+
+    def _delete_transaction_item(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> dict:
+        invoice_id = clean_text(first_value(payload, ["invoiceId", "invoice_id"], ""), maximum=180)
+        unit_code = clean_text(first_value(payload, ["unitCode", "unitImei", "imei", "code"], ""), maximum=180)
+        if not invoice_id or not unit_code:
+            raise StoreError(422, "missing_item_reference", "Invoice ID and unit IMEI / code are required")
+        transaction = conn.execute(
+            "SELECT * FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (invoice_id,)
+        ).fetchone()
+        if not transaction:
+            raise StoreError(404, "invoice_not_found", f"Invoice '{invoice_id}' was not found")
+        item = conn.execute(
+            "SELECT * FROM v2_transaction_items WHERE transaction_id=? AND unit_code=? COLLATE NOCASE ORDER BY id LIMIT 1",
+            (transaction["id"], unit_code),
+        ).fetchone()
+        if not item:
+            raise StoreError(404, "invoice_item_not_found", f"Item '{unit_code}' was not found on this invoice")
+        remaining_count = int(conn.execute(
+            "SELECT COUNT(*) FROM v2_transaction_items WHERE transaction_id=?", (transaction["id"],)
+        ).fetchone()[0])
+        if remaining_count <= 1:
+            raise StoreError(409, "last_invoice_item", "This is the final invoice item. Delete the complete invoice instead.")
+        if transaction["transaction_type"] in {"Sale", "Issue"} and item["unit_id"]:
+            dependent = conn.execute(
+                "SELECT child.invoice_id FROM v2_transactions child "
+                "JOIN v2_transaction_items child_item ON child_item.transaction_id=child.id "
+                "WHERE child.linked_invoice_id=? COLLATE NOCASE AND child_item.unit_id=? LIMIT 1",
+                (transaction["invoice_id"], item["unit_id"]),
+            ).fetchone()
+            if dependent:
+                raise StoreError(
+                    409, "invoice_item_has_dependent",
+                    f"Delete linked transaction '{dependent['invoice_id']}' before deleting this item.",
+                )
+
+        target = self._validate_transaction_unit_reversal(conn, transaction, item)
+        now = utc_now()
+        if item["unit_id"] and target:
+            conn.execute(
+                "UPDATE v2_units SET status=?,updated_at=?,revision=? WHERE id=?",
+                (target, now, revision, item["unit_id"]),
+            )
+        conn.execute("DELETE FROM v2_transaction_items WHERE id=?", (item["id"],))
+
+        rows = conn.execute(
+            "SELECT price_cents,discount_cents,quantity FROM v2_transaction_items WHERE transaction_id=?",
+            (transaction["id"],),
+        ).fetchall()
+        calculated = sum(int(row["price_cents"]) * int(row["quantity"]) for row in rows)
+        line_discounts = sum(int(row["discount_cents"]) * int(row["quantity"]) for row in rows)
+        old_line_discounts = line_discounts + int(item["discount_cents"]) * int(item["quantity"])
+        global_discount = max(0, int(transaction["discount_cents"]) - old_line_discounts)
+        total = calculated if transaction["transaction_type"] == "Return" else max(0, calculated - global_discount)
+        subtotal = calculated + line_discounts
+        discount = line_discounts + global_discount
+        quantity = sum(int(row["quantity"]) for row in rows)
+
+        raw = json_object(transaction["raw_json"])
+        for key in ("items", "purchasedItems", "returnedItems"):
+            if key in raw:
+                raw[key] = self._remove_unit_from_raw_lines(raw[key], item["unit_code"])
+        raw.update({
+            "subTotal": cents_to_legacy(subtotal), "discount": cents_to_legacy(discount),
+            "total": cents_to_legacy(total), "totalPrice": cents_to_legacy(total),
+            "totalQty": quantity, "totalQuantity": quantity, "revision": revision,
+        })
+        conn.execute(
+            "UPDATE v2_transactions SET subtotal_cents=?,discount_cents=?,total_cents=?,quantity=?,raw_json=?,revision=? WHERE id=?",
+            (subtotal, discount, total, quantity, canonical_json(raw), revision, transaction["id"]),
+        )
+        conn.execute("DELETE FROM v2_operation_receipts WHERE invoice_id=? COLLATE NOCASE", (transaction["invoice_id"],))
+        if item["product_id"]:
+            self._refresh_product(conn, int(item["product_id"]), revision)
+        updated = conn.execute("SELECT * FROM v2_transactions WHERE id=?", (transaction["id"],)).fetchone()
+        return {
+            "invoiceId": transaction["invoice_id"], "unitCode": item["unit_code"],
+            "transaction": self._transaction_to_dict(conn, updated),
+        }
 
     def _refresh_product(self, conn: sqlite3.Connection, product_id: int, revision: int) -> None:
         available = conn.execute(

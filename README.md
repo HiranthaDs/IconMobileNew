@@ -22,6 +22,8 @@ Other devices : http://192.168.1.168:8000/
 
 Use the `192.168...` address on every other device. All devices must be on the same Wi-Fi/LAN. If Windows asks about firewall access, allow Python on **Private networks**. Do not enter `localhost` on a phone; that points to the phone itself.
 
+For public or reverse-proxy hosting, serve the FastAPI application and these HTML/assets from the same hostname. Invoice pages require `/api/v1/invoices/...` on that host; a static-only host cannot read the SQLite database. Shared invoice links retain the public HTTPS origin. A private LAN address is substituted only when the host computer is opened through `localhost`.
+
 Pages:
 
 - POS: `/`
@@ -31,6 +33,19 @@ Pages:
 - Shared invoice: `/invoice.html?id=INVOICE-ID`
 - Partner statement: `/B2Binvoice.html?name=PARTNER-NAME`
 - Mobile scanner: generated from the POS/inventory scanner QR
+
+## Admin corrections and deletion rules
+
+The admin portal can edit partner contact details, delete partner profiles, delete complete invoices, delete individual invoice lines, delete inventory product groups, and delete individual available inventory units.
+
+- Deleting an invoice reverses its committed stock movement and refreshes product quantities in the same SQLite transaction.
+- A sale/issue with linked returns or payments is protected until the linked records are deleted first.
+- Deleting one invoice line restores only that unit and recalculates invoice totals. The last line is protected; delete the complete invoice instead.
+- Editing a partner updates its linked invoice contact snapshots and any `Partner:` inventory labels.
+- Deleting a partner profile preserves historical invoices. A partner holding assigned stock must return or reassign it first.
+- Sold and partner-assigned inventory units cannot be deleted. Available and returned units can be removed individually.
+
+Every successful correction increments the central revision and is broadcast to other connected devices.
 
 ## Default logins
 

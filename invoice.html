@@ -190,7 +190,8 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
         const INVOICE_CACHE_PREFIX = "ICON_MOBILE_INVOICE_LOCAL_SQLITE_V1:";
         const invoiceSafeStorage = {
             get(key, fallback = null) { try { return localStorage.getItem(key) ?? fallback; } catch(e) { return fallback; } },
-            set(key, value) { try { localStorage.setItem(key, value); } catch(e) {} }
+            set(key, value) { try { localStorage.setItem(key, value); } catch(e) {} },
+            remove(key) { try { localStorage.removeItem(key); } catch(e) {} }
         };
         const safeParseJSON = (value, fallback = null) => {
             if (value === null || value === undefined || value === '') return fallback;
@@ -253,7 +254,10 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
             const fetchInvoice = useCallback(async (silent = false) => {
                 if (!silent) { setLoading(true); setError(""); }
                 const urlParams = new URLSearchParams(window.location.search);
-                const targetId = String(urlParams.get('id') || '').trim();
+                const hashId = window.location.hash.startsWith('#invoice=') ? window.location.hash.slice(9) : '';
+                const targetId = String(
+                    urlParams.get('id') || urlParams.get('invoice') || urlParams.get('invoiceId') || hashId || ''
+                ).trim();
                 if (!targetId) {
                     if (!silent) { setError("No Invoice ID provided in the link."); setLoading(false); }
                     return;
@@ -277,12 +281,22 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                     invoiceSafeStorage.set(cacheKey, JSON.stringify({ invoice: normalized, savedAt: Date.now() }));
                 } catch (e) {
                     console.error('Invoice load failed:', e);
+                    if (e?.code === 'invoice_not_found') {
+                        invoiceSafeStorage.remove(cacheKey);
+                        setInvoiceData(null);
+                        if (!silent) setError(`Invoice ${targetId} was not found. It may have been deleted by an administrator.`);
+                        if (!silent) setLoading(false);
+                        return;
+                    }
                     const cachedEnvelope = safeParseJSON(invoiceSafeStorage.get(cacheKey, ''), null);
                     if (cachedEnvelope && cachedEnvelope.invoice) {
                         try { applyInvoice(cachedEnvelope.invoice); }
                         catch (cacheError) { if (!silent) setError(`Failed to load invoice: ${e.message || e}`); }
                     } else if (!silent) {
-                        setError(`Failed to connect to the ICON MOBILE local database: ${e.message || e}`);
+                        const hostedHint = window.location.protocol === 'file:'
+                            ? ' Open this page through the ICON MOBILE Python/FastAPI server, not as a local file.'
+                            : ' Confirm this hostname is serving both the FastAPI API and invoice.html; static-only hosting cannot read the SQLite database.';
+                        setError(`Failed to connect to the ICON MOBILE invoice database: ${e.message || e}.${hostedHint}`);
                     }
                 }
                 if (!silent) setLoading(false);
