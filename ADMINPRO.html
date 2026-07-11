@@ -1,0 +1,1987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICON MOBILE - Advanced Inventory & Analytics</title>
+    
+    <link rel="stylesheet" href="/assets/app.css">
+    <script src="/assets/vendor/react.production.min.js"></script>
+    <script src="/assets/vendor/react-dom.production.min.js"></script>
+    <script src="/assets/vendor/babel.min.js"></script>
+    <script src="/assets/local-api.js"></script>
+
+    <style>
+        :root { --bg-base: #f2f2f7; --accent: #000000; --accent-hover: #333333; --text-main: #1c1c1e; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif; background-color: var(--bg-base); color: var(--text-main); margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d1d1d6; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #8e8e93; }
+        
+        .pro-input { background-color: #ffffff; border: 1px solid #e5e5ea; border-radius: 10px; color: var(--text-main); font-size: 0.875rem; transition: all 0.2s ease; width: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+        .pro-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.1); }
+        .pro-input:disabled { background-color: #f2f2f7; color: #8e8e93; cursor: not-allowed; }
+        
+        .pro-button { display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem; border-radius: 10px; font-weight: 600; transition: all 0.15s; cursor: pointer; font-size: 0.875rem; }
+        .pro-button.primary { background-color: #007aff; color: white; border: 1px solid transparent; box-shadow: 0 4px 6px rgba(0, 122, 255, 0.2); }
+        .pro-button.primary:hover:not(:disabled) { background-color: #005bb5; transform: translateY(-1px); box-shadow: 0 6px 12px rgba(0, 122, 255, 0.3); }
+        .pro-button.primary:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; transform: none; }
+        
+        .pro-button.black-btn { background-color: #000000; color: white; border: 1px solid transparent; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+        .pro-button.black-btn:hover:not(:disabled) { background-color: #333333; transform: translateY(-1px); box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2); }
+        .pro-button.black-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+        
+        .pro-button.secondary { background-color: #ffffff; border: 1px solid #d1d1d6; color: #1c1c1e; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+        .pro-button.secondary:hover { background-color: #f2f2f7; border-color: #c7c7cc; }
+        
+        .pro-button.ghost { background-color: transparent; border: 1px solid transparent; color: #8e8e93; }
+        .pro-button.ghost:hover { background-color: #e5e5ea; color: #1c1c1e; }
+        .pro-button.ghost.active { background-color: #ffffff; color: #000000; border-color: #d1d1d6; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+        
+        .glass-overlay { background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 9999; }
+        
+        @keyframes slideIn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .toast-animate { animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .fade-in { animation: fadeIn 0.3s ease forwards; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Perfect Print Architecture for A4 Portrait */
+        @media screen { .print-only { display: none !important; } }
+        @media print {
+            @page { size: A4 portrait; margin: 0 !important; }
+            html, body { width: 100% !important; height: auto !important; min-height: 100% !important; background-color: #ffffff !important; margin: 0 !important; padding: 0 !important; color: #000000 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif !important; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; width: 100% !important; margin: 0 !important; padding: 0 !important; background-color: #ffffff !important; box-sizing: border-box !important; }
+            .pdf-page { width: 100%; height: 297mm; padding: 15mm 20mm; box-sizing: border-box; position: relative; overflow: hidden; page-break-after: always; }
+            .pdf-page:last-child { page-break-after: auto; }
+            table { border-collapse: collapse; width: 100%; border: none !important; table-layout: fixed; }
+            tr { page-break-inside: avoid; page-break-after: auto; border: none !important; }
+            thead { display: table-header-group; }
+            tfoot { display: table-footer-group; }
+            th, td { border-left: none !important; border-right: none !important; word-wrap: break-word; overflow-wrap: break-word; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+    
+
+    /* Safe startup screen: prevents invisible blank pages when CDN/Babel/backend fails */
+    .boot-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at top left,#e0f2fe 0,transparent 36%),radial-gradient(circle at bottom right,#dbeafe 0,transparent 34%),#f8fafc; padding:24px; font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,sans-serif; }
+    .boot-card { width:min(430px,100%); background:rgba(255,255,255,.86); border:1px solid rgba(255,255,255,.74); border-radius:32px; padding:32px; text-align:center; box-shadow:0 30px 90px rgba(15,23,42,.16); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%); }
+    .boot-spinner { width:48px; height:48px; border-radius:999px; border:4px solid rgba(37,99,235,.14); border-top-color:#2563eb; animation:bootSpin .9s linear infinite; margin:0 auto 18px; }
+    @keyframes bootSpin { to { transform:rotate(360deg); } }
+
+  </style>
+</head>
+<body>
+    <div id="root" class="w-full h-full">
+    <div class="boot-screen">
+      <div class="boot-card">
+        <div class="boot-spinner"></div>
+        <h1 style="font-size:22px;font-weight:900;letter-spacing:-.04em;margin:0;color:#0f172a;">ICON MOBILE ERP</h1>
+        <p style="font-size:13px;font-weight:700;color:#64748b;margin:8px 0 0;line-height:1.5;">Loading system safely...</p>
+      </div>
+    </div>
+  </div>
+
+    
+  <script>
+    (function(){
+      window.__ICON_BOOT_ERROR__ = function(message){
+        var root = document.getElementById('root');
+        if (!root) return;
+        var safe = String(message || 'Unknown startup error').replace(/[<>&]/g, function(c){ return ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]); });
+        root.innerHTML = '<div class="boot-screen"><div class="boot-card"><div style="width:56px;height:56px;border-radius:22px;background:#fee2e2;color:#dc2626;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-weight:900;font-size:24px;">!</div><h1 style="font-size:22px;font-weight:900;margin:0;color:#0f172a;">Application could not start</h1><p style="font-size:13px;font-weight:700;color:#64748b;margin:10px 0 0;line-height:1.55;">'+ safe +'</p><p style="font-size:12px;color:#94a3b8;margin-top:14px;line-height:1.5;">Open this page through the ICON MOBILE Python server and verify the local assets are installed.</p></div></div>';
+      };
+      window.addEventListener('error', function(e){
+        if (!document.body.classList.contains('app-mounted')) window.__ICON_BOOT_ERROR__(e.message || 'Startup script error');
+      });
+      window.addEventListener('unhandledrejection', function(e){
+        if (!document.body.classList.contains('app-mounted')) window.__ICON_BOOT_ERROR__((e.reason && (e.reason.stack || e.reason.message || e.reason)) || 'Startup promise error');
+      });
+      setTimeout(function(){
+        if (!document.body.classList.contains('app-mounted')) {
+          var root = document.getElementById('root');
+          if (root && /Loading/i.test(root.textContent || '')) window.__ICON_BOOT_ERROR__('The app is taking too long to start. Check the Python server and local browser assets.');
+        }
+      }, 18000);
+    })();
+  </script>
+
+  <script type="text/babel">
+try {
+if (!window.React || !window.ReactDOM) { throw new Error('Local React assets did not load. Run setup.ps1 and use the Python server.'); }
+if (!window.Babel) { throw new Error('Local Babel asset did not load. Run setup.ps1.'); }
+if (!window.IconAPI) { throw new Error('Local API client did not load. Open this page through the ICON MOBILE Python server.'); }
+
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        const ADMIN_DATA_CACHE_KEY = "ICON_MOBILE_ADMIN_LOCAL_SQLITE_SNAPSHOT_V1";
+        const adminSafeStorage = {
+            get(key, fallback = null) { try { return localStorage.getItem(key) ?? fallback; } catch(e) { return fallback; } },
+            set(key, value) { try { localStorage.setItem(key, value); } catch(e) {} }
+        };
+
+        
+        const Icons = {
+            Inventory: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21 16-9 5-9-5"/><path d="m21 8-9 5-9-5"/><path d="m3 8 9-5 9 5"/><path d="m12 22v-9"/></svg>,
+            Chart: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>,
+            Users: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+            Loader: () => <svg className="animate-spin text-current" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
+            Scan: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><line x1="7" y1="12" x2="17" y2="12"></line></svg>,
+            Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>,
+            AlertTriangle: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>,
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>,
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+            Edit: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>,
+            Trash: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>,
+            ArrowLeft: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>,
+            Eye: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>,
+            WhatsApp: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>,
+            Link: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
+            Print: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>,
+            Filter: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>,
+            Calendar: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>,
+            Refresh: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        };
+
+        const DATASETS = {
+            Types: ["Mobile Phone", "Tablet", "Smartwatch", "Laptop", "Accessory", "Spare Part", "Service", "Audio", "Wearable", "Gaming", "Other"],
+            Categories: ["Smartphones", "Feature Phones", "Tablets", "Laptops", "Earbuds", "Headphones", "Bluetooth Speakers", "Chargers & Adapters", "Cables", "Cases & Covers", "Screen Protectors", "Power Banks", "Smartwatches", "Fitness Bands", "Batteries", "Displays", "Motherboards", "Camera Modules", "Keyboards", "Mice", "Other"],
+            Brands: ["Apple", "Samsung", "Xiaomi", "Huawei", "Google", "OnePlus", "Oppo", "Vivo", "Sony", "Nokia", "Motorola", "Realme", "Infinix", "Tecno", "Asus", "Lenovo", "LG", "HTC", "ZTE", "Itel", "Nothing", "Honor", "Poco", "JBL", "Bose", "Beats", "Sennheiser", "Anker", "Baseus", "Spigen", "Ugreen", "Belkin"],
+            Models: ["iPhone 15 Pro Max", "iPhone 15 Pro", "iPhone 15 Plus", "iPhone 15", "iPhone 14 Pro Max", "iPhone 14 Pro", "iPhone 14 Plus", "iPhone 14", "Galaxy S24 Ultra", "Galaxy S24+", "Galaxy S24", "Galaxy S23 Ultra", "Galaxy Z Fold 5", "Galaxy Z Flip 5", "Pixel 8 Pro", "Pixel 8", "Redmi Note 13 Pro", "Poco X6 Pro", "iPad Pro 12.9"],
+            Colors: ["Black", "Midnight Black", "Phantom Black", "Space Black", "White", "Silver", "Titanium", "Gold", "Rose Gold", "Blue", "Pacific Blue", "Sierra Blue", "Red", "Green", "Alpine Green", "Yellow", "Purple", "Pink", "Orange", "Clear"],
+            Statuses: ["Available", "Sold", "Reserved", "In Repair", "Defective", "Returned"],
+            RAMs: ["1GB", "2GB", "3GB", "4GB", "6GB", "8GB", "12GB", "16GB", "24GB", "None"],
+            ROMs: ["16GB", "32GB", "64GB", "128GB", "256GB", "512GB", "1TB", "2TB", "None"]
+        };
+
+        const AutocompleteInput = ({ name, value, onChange, options = [], placeholder, type = "text", required = false, disabled = false, className = "" }) => {
+            const [show, setShow] = useState(false);
+            const [focus, setFocus] = useState(false);
+
+            const filtered = options.filter(o => o.toLowerCase().includes((value||'').toLowerCase()));
+            const exactMatch = filtered.length === 1 && filtered[0].toLowerCase() === (value||'').toLowerCase();
+
+            return (
+                <div className="relative w-full">
+                    <input 
+                        name={name} value={value||''} onChange={onChange}
+                        onFocus={() => { setFocus(true); setShow(true); }}
+                        onBlur={() => setTimeout(() => setFocus(false), 200)}
+                        placeholder={placeholder} type={type} required={required} disabled={disabled}
+                        className={`pro-input ${className} ${disabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200 shadow-inner' : ''}`} autoComplete="off"
+                    />
+                    {focus && show && filtered.length > 0 && !exactMatch && !disabled && (
+                        <ul className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto mt-1 fade-in py-1">
+                            {filtered.map(opt => (
+                                <li key={opt} 
+                                    onPointerDown={(e) => e.preventDefault()}
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        onChange({ target: { name, value: opt } });
+                                        setShow(false);
+                                    }}
+                                    className="px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0 text-sm font-medium text-gray-700"
+                                >
+                                    {opt}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )
+        }
+
+        class ErrorBoundary extends React.Component {
+            constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+            static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center p-6">
+                            <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-lg border border-red-200 text-center">
+                                <div className="flex justify-center mb-4 text-red-500"><Icons.AlertTriangle /></div>
+                                <h2 className="text-xl font-black text-gray-900 mb-2">Rendering Error</h2>
+                                <p className="text-sm text-gray-600 mb-4">We encountered a problem displaying this application.</p>
+                                <div className="bg-gray-50 p-4 rounded-xl overflow-x-auto text-xs font-mono text-red-600 mb-6 text-left border border-gray-200">{this.state.error?.toString()}</div>
+                                <button onClick={() => window.location.reload()} className="w-full py-3 bg-[#000000] text-white font-bold rounded-xl shadow-md hover:bg-[#333333] transition-colors">Reload Page</button>
+                            </div>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        const formatSpecsDisplay = (specsStr) => {
+            if (!specsStr) return "";
+            if (specsStr.startsWith('{')) {
+                try {
+                    const parsed = JSON.parse(specsStr);
+                    let display = [];
+                    if (parsed.RAM && parsed.RAM.trim() !== "" && parsed.RAM.trim().toLowerCase() !== "none") display.push(`${parsed.RAM} RAM`);
+                    if (parsed.ROM && parsed.ROM.trim() !== "" && parsed.ROM.trim().toLowerCase() !== "none") display.push(`${parsed.ROM} ROM`);
+                    if (parsed.Other && parsed.Other.trim() !== "") display.push(parsed.Other);
+                    return display.join(' • ');
+                } catch (e) { return specsStr; }
+            }
+            return specsStr;
+        };
+
+        const isWarrantyExpired = (endDateStr) => {
+            if (!endDateStr || endDateStr === 'None' || endDateStr === 'N/A') return false;
+            const end = new Date(endDateStr);
+            if (isNaN(end)) return false; 
+            return end < new Date();
+        };
+
+        const parseSmartDate = (dateStr) => {
+            if (!dateStr) return new Date();
+            let clean = dateStr.replace(/["']/g, "").replace(/\s+at\s+/i, ' ').trim();
+            
+            const ymdMatch = clean.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+            if (ymdMatch) {
+                const y = parseInt(ymdMatch[1], 10);
+                const m = parseInt(ymdMatch[2], 10) - 1;
+                const d = parseInt(ymdMatch[3], 10);
+                const tempDate = new Date(y, m, d);
+                if (!isNaN(tempDate.getTime())) return tempDate;
+            }
+
+            const dmyMatch = clean.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+            if (dmyMatch) {
+                const p1 = parseInt(dmyMatch[1], 10);
+                const p2 = parseInt(dmyMatch[2], 10);
+                const y = parseInt(dmyMatch[3], 10);
+                let tempDate;
+                if (p1 > 12) { tempDate = new Date(y, p2 - 1, p1); } 
+                else if (p2 > 12) { tempDate = new Date(y, p1 - 1, p2); } 
+                else { tempDate = new Date(y, p2 - 1, p1); }
+                if (!isNaN(tempDate.getTime())) return tempDate;
+            }
+
+            let parsed = new Date(clean);
+            if (!isNaN(parsed.getTime())) return parsed;
+            
+            return new Date(); 
+        };
+
+        const generateDateSignatures = (d) => {
+            const y = d.getFullYear();
+            const m = d.getMonth() + 1;
+            const day = d.getDate();
+            
+            const jan4 = new Date(y, 0, 4);
+            const dow = jan4.getDay() || 7;
+            const week1Start = jan4.getTime() - (dow - 1) * 86400000;
+            const weekNum = Math.floor(((d.getTime() - week1Start) / 86400000) / 7) + 1;
+            
+            return {
+                dailyStr: `${y}-${m.toString().padStart(2,'0')}-${day.toString().padStart(2,'0')}`,
+                monthlyStr: `${y}-${m.toString().padStart(2,'0')}`,
+                yearlyStr: `${y}`,
+                weeklyStr: `${y}-W${weekNum.toString().padStart(2,'0')}`
+            };
+        };
+
+        const LineChart = ({ data }) => {
+            if (!data || data.length === 0) return <div className="text-gray-400 text-xs font-medium w-full h-full flex items-center justify-center min-h-[160px]">No sales data available.</div>;
+
+            const maxVal = Math.max(...data.flatMap(d => [d.rev, d.cost, d.prof]), 100);
+            const minVal = Math.min(...data.flatMap(d => [d.rev, d.cost, d.prof, 0])); 
+            const range = maxVal - minVal || 1;
+            
+            const width = 800; const height = 260; const pLeft = 60; const pRight = 20; const pTop = 20; const pBottom = 45;
+            const graphWidth = width - pLeft - pRight; const graphHeight = height - pTop - pBottom;
+            
+            const getX = (index) => data.length === 1 ? width / 2 : pLeft + (index * graphWidth / (data.length - 1));
+            const getY = (val) => height - pBottom - (((val - minVal) / range) * graphHeight);
+
+            const makePath = (key) => {
+                if (data.length <= 1) return ``; // Circles will show for single item
+                return data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(d[key])}`).join(' ');
+            };
+
+            const [hoverIdx, setHoverIdx] = useState(null);
+
+            return (
+                <div className="relative w-full pb-2">
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
+                        <text transform={`rotate(-90) translate(-${height/2}, 14)`} textAnchor="middle" fontSize="10" fill="#8e8e93" className="font-sans font-bold uppercase tracking-widest">Amount (LKR)</text>
+                        <text x={pLeft + graphWidth/2} y={height - 4} textAnchor="middle" fontSize="10" fill="#8e8e93" className="font-sans font-bold uppercase tracking-widest">Time Period</text>
+
+                        {[0, 0.5, 1].map(pct => {
+                            const yPos = height - pBottom - (graphHeight * pct);
+                            return (
+                                <g key={pct}>
+                                    <line x1={pLeft} y1={yPos} x2={width - pRight} y2={yPos} stroke="#e5e5ea" strokeDasharray="none" strokeWidth="1" />
+                                    <text x={pLeft - 8} y={yPos + 4} textAnchor="end" fontSize="10" fill="#9ca3af" className="font-sans font-medium">
+                                        {(minVal + range * pct).toLocaleString(undefined, {notation:'compact'})}
+                                    </text>
+                                </g>
+                            )
+                        })}
+
+                        {minVal < 0 && <line x1={pLeft} y1={getY(0)} x2={width - pRight} y2={getY(0)} stroke="#ff3b30" strokeWidth="1.5" strokeDasharray="4" />}
+
+                        {data.length > 1 && (
+                            <>
+                                <path d={makePath('rev')} fill="none" stroke="#000000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="transition-all duration-300" />
+                                <path d={makePath('cost')} fill="none" stroke="#8e8e93" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="transition-all duration-300" />
+                                <path d={makePath('prof')} fill="none" stroke="#34c759" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="transition-all duration-300" />
+                            </>
+                        )}
+                        
+                        {data.map((d, i) => (
+                            <g key={i}>
+                                <text x={getX(i)} y={height - pBottom + 20} textAnchor="middle" fontSize="10" fill="#8e8e93" className="font-sans font-medium">{d.label}</text>
+                                <rect x={data.length === 1 ? 0 : getX(i) - (graphWidth / Math.max(data.length, 1)) / 2} y={0} width={data.length === 1 ? width : graphWidth / Math.max(data.length, 1)} height={height} fill="transparent"
+                                    onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)} className="cursor-pointer outline-none z-50 relative" />
+                                
+                                <circle cx={getX(i)} cy={getY(d.rev)} r="4" fill="#000000" stroke="#fff" strokeWidth="1.5" />
+                                <circle cx={getX(i)} cy={getY(d.cost)} r="4" fill="#8e8e93" stroke="#fff" strokeWidth="1.5" />
+                                <circle cx={getX(i)} cy={getY(d.prof)} r="4" fill="#34c759" stroke="#fff" strokeWidth="1.5" />
+
+                                {hoverIdx === i && (
+                                    <g>
+                                        <line x1={getX(i)} y1={pTop} x2={getX(i)} y2={height - pBottom} stroke="#c7c7cc" strokeWidth="1" strokeDasharray="4" />
+                                        <circle cx={getX(i)} cy={getY(d.rev)} r="6" fill="#000000" stroke="#fff" strokeWidth="2" />
+                                        <circle cx={getX(i)} cy={getY(d.cost)} r="6" fill="#8e8e93" stroke="#fff" strokeWidth="2" />
+                                        <circle cx={getX(i)} cy={getY(d.prof)} r="6" fill="#34c759" stroke="#fff" strokeWidth="2" />
+                                    </g>
+                                )}
+                            </g>
+                        ))}
+                    </svg>
+                    {hoverIdx !== null && (
+                        <div className="absolute bg-white/95 backdrop-blur-xl text-black p-3 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] pointer-events-none text-xs transform -translate-x-1/2 z-50 border border-gray-200 w-52" 
+                             style={{ left: `${(getX(hoverIdx) / width) * 100}%`, top: `${(getY(data[hoverIdx].rev) / height) * 100}%`, marginTop: '-60px' }}>
+                            <div className="font-bold mb-2 border-b border-gray-100 pb-1.5 text-gray-900 text-center tracking-tight">{data[hoverIdx].label}</div>
+                            <div className="flex justify-between items-center mb-1"><span className="text-gray-500 font-medium">Revenue</span> <span className="font-semibold text-gray-900">LKR {data[hoverIdx].rev.toLocaleString()}</span></div>
+                            <div className="flex justify-between items-center mb-1"><span className="text-gray-500 font-medium">Costs</span> <span className="font-semibold text-gray-600">LKR {data[hoverIdx].cost.toLocaleString()}</span></div>
+                            <div className="flex justify-between items-center border-t border-gray-100 mt-1.5 pt-1.5"><span className="text-gray-900 font-bold">Net Profit</span> <span className={`font-bold ${data[hoverIdx].prof < 0 ? 'text-red-500' : 'text-green-500'}`}>LKR {data[hoverIdx].prof.toLocaleString()}</span></div>
+                        </div>
+                    )}
+                </div>
+            )
+        };
+
+        const BarChart = ({ data }) => {
+            if (!data || data.length === 0) return <div className="text-gray-400 text-xs font-medium w-full h-full flex items-center justify-center min-h-[160px]">No sales data available.</div>;
+
+            const maxVal = Math.max(...data.flatMap(d => [d.rev, d.cost, Math.max(0, d.prof)]), 100);
+            const minVal = Math.min(...data.flatMap(d => [d.prof]), 0); 
+            const range = (maxVal - minVal) || 1;
+            
+            const width = 800; const height = 260; const pLeft = 60; const pRight = 20; const pTop = 20; const pBottom = 45;
+            const graphWidth = width - pLeft - pRight; const graphHeight = height - pTop - pBottom;
+            
+            const getY = (val) => height - pBottom - (((val - minVal) / range) * graphHeight);
+            const zeroY = getY(0);
+
+            const groupWidth = graphWidth / Math.max(data.length, 1);
+            const barWidth = Math.min(groupWidth / 4, 16); const gap = 3;
+            const getX = (index) => pLeft + (index * groupWidth) + groupWidth/2;
+
+            const [hoverIdx, setHoverIdx] = useState(null);
+
+            return (
+                <div className="relative w-full pb-2">
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
+                        <text transform={`rotate(-90) translate(-${height/2}, 14)`} textAnchor="middle" fontSize="10" fill="#8e8e93" className="font-sans font-bold uppercase tracking-widest">Amount (LKR)</text>
+                        <text x={pLeft + graphWidth/2} y={height - 4} textAnchor="middle" fontSize="10" fill="#8e8e93" className="font-sans font-bold uppercase tracking-widest">Time Period</text>
+
+                        {[0, 0.5, 1].map(pct => {
+                            const yPos = height - pBottom - (graphHeight * pct);
+                            return (<g key={pct}><line x1={pLeft} y1={yPos} x2={width - pRight} y2={yPos} stroke="#e5e5ea" strokeDasharray="none" strokeWidth="1" /></g>);
+                        })}
+
+                        <line x1={pLeft} y1={zeroY} x2={width - pRight} y2={zeroY} stroke="#c7c7cc" strokeWidth="1.5" />
+
+                        {data.map((d, i) => {
+                            const cx = getX(i);
+                            const revH = (Math.abs(d.rev) / range) * graphHeight; const costH = (Math.abs(d.cost) / range) * graphHeight; const profH = (Math.abs(d.prof) / range) * graphHeight;
+                            const rY = d.rev >= 0 ? zeroY - revH : zeroY; const cY = d.cost >= 0 ? zeroY - costH : zeroY; const pY = d.prof >= 0 ? zeroY - profH : zeroY;
+
+                            return (
+                                <g key={i}>
+                                    <rect x={cx - barWidth*1.5 - gap} y={rY} width={barWidth} height={revH} fill="#000000" rx="3" className="transition-all duration-300" />
+                                    <rect x={cx - barWidth/2} y={cY} width={barWidth} height={costH} fill="#8e8e93" rx="3" className="transition-all duration-300" />
+                                    <rect x={cx + barWidth/2 + gap} y={pY} width={barWidth} height={profH} fill={d.prof >= 0 ? "#34c759" : "#ff3b30"} rx="3" className="transition-all duration-300" />
+                                    <text x={cx} y={height - pBottom + 20} textAnchor="middle" fontSize="10" fill="#8e8e93" className="font-sans font-medium">{d.label}</text>
+                                    <rect x={cx - groupWidth/2} y={0} width={groupWidth} height={height} fill="transparent"
+                                        onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)} className="cursor-pointer outline-none" />
+                                </g>
+                            )
+                        })}
+                    </svg>
+
+                    {hoverIdx !== null && (
+                        <div className="absolute bg-white/95 backdrop-blur-xl text-black p-3 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] pointer-events-none text-xs transform -translate-x-1/2 z-50 border border-gray-200 w-52" 
+                             style={{ left: `${(getX(hoverIdx) / width) * 100}%`, top: `60px`, marginTop: '0' }}>
+                            <div className="font-bold mb-2 border-b border-gray-100 pb-1.5 text-gray-900 text-center tracking-tight">{data[hoverIdx].label}</div>
+                            <div className="flex justify-between items-center mb-1"><span className="text-gray-500 font-medium">Revenue</span> <span className="font-semibold text-gray-900">LKR {data[hoverIdx].rev.toLocaleString()}</span></div>
+                            <div className="flex justify-between items-center mb-1"><span className="text-gray-500 font-medium">Costs</span> <span className="font-semibold text-gray-600">LKR {data[hoverIdx].cost.toLocaleString()}</span></div>
+                            <div className="flex justify-between items-center border-t border-gray-100 mt-1.5 pt-1.5"><span className="text-gray-900 font-bold">Net Profit</span> <span className={`font-bold ${data[hoverIdx].prof < 0 ? 'text-red-500' : 'text-green-500'}`}>LKR {data[hoverIdx].prof.toLocaleString()}</span></div>
+                        </div>
+                    )}
+                </div>
+            )
+        };
+
+        const PrintableAnalyticsReport = ({ logs, totals, filterTitle, filterSubtitle }) => {
+            const ITEMS_PER_PAGE = 10;
+            const chunks = [];
+            for (let i = 0; i < logs.length; i += ITEMS_PER_PAGE) {
+                chunks.push(logs.slice(i, i + ITEMS_PER_PAGE));
+            }
+            if (chunks.length === 0) chunks.push([]);
+
+            return (
+                <div className="print-only">
+                    {chunks.map((chunk, pageIndex) => (
+                        <div key={pageIndex} className="pdf-page" style={{ pageBreakAfter: pageIndex < chunks.length - 1 ? 'always' : 'auto' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingBottom: '16px', marginBottom: '24px', borderBottom: '1px solid #E5E5EA' }}>
+                                <div>
+                                    <h1 style={{ fontSize: '32px', fontWeight: '800', letterSpacing: '-1px', margin: '0 0 4px 0', color: '#000000' }}>ICON MOBILE</h1>
+                                    <h2 style={{ fontSize: '11px', fontWeight: '600', color: '#8E8E93', margin: '0', letterSpacing: '0.8px', textTransform: 'uppercase' }}>Financial Intelligence Report</h2>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#000000', textTransform: 'uppercase', marginBottom: '4px', letterSpacing: '0.5px' }}>
+                                        {filterTitle} {chunks.length > 1 ? `(Page ${pageIndex + 1}/${chunks.length})` : ''}
+                                    </div>
+                                    <p style={{ fontSize: '10px', color: '#8E8E93', margin: '0 0 2px 0', fontWeight: '500' }}>{filterSubtitle}</p>
+                                    <p style={{ fontSize: '9px', color: '#C7C7CC', margin: '0', fontWeight: '500' }}>Generated: {new Date().toLocaleString()}</p>
+                                </div>
+                            </div>
+
+                            {pageIndex === 0 && (
+                                <div style={{ display: 'flex', gap: '20px', marginBottom: '30px' }}>
+                                    <div style={{ flex: 1, padding: '12px 0', borderTop: '1px solid #E5E5EA', borderBottom: '1px solid #E5E5EA', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        <span style={{ fontSize: '9px', fontWeight: '600', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Income</span>
+                                        <span style={{ fontSize: '20px', fontWeight: '700', color: '#000000', letterSpacing: '-0.5px' }}>LKR {totals.tRev.toLocaleString(undefined, {maximumFractionDigits:0})}</span>
+                                    </div>
+                                    <div style={{ flex: 1, padding: '12px 0', borderTop: '1px solid #E5E5EA', borderBottom: '1px solid #E5E5EA', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        <span style={{ fontSize: '9px', fontWeight: '600', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Spend (COGS)</span>
+                                        <span style={{ fontSize: '20px', fontWeight: '700', color: '#000000', letterSpacing: '-0.5px' }}>LKR {totals.tCost.toLocaleString(undefined, {maximumFractionDigits:0})}</span>
+                                    </div>
+                                    <div style={{ flex: 1, padding: '12px 0', borderTop: '1px solid #E5E5EA', borderBottom: '1px solid #E5E5EA', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        <span style={{ fontSize: '9px', fontWeight: '600', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Warranty Add-ons</span>
+                                        <span style={{ fontSize: '20px', fontWeight: '700', color: '#000000', letterSpacing: '-0.5px' }}>LKR {totals.tExt.toLocaleString(undefined, {maximumFractionDigits:0})}</span>
+                                    </div>
+                                    <div style={{ flex: 1, padding: '12px 0', borderTop: '2px solid #000000', borderBottom: '2px solid #000000', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        <span style={{ fontSize: '9px', fontWeight: '600', color: totals.tProf < 0 ? '#FF3B30' : '#000000', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Net Profit</span>
+                                        <span style={{ fontSize: '20px', fontWeight: '800', letterSpacing: '-0.5px', color: totals.tProf < 0 ? '#FF3B30' : '#34C759' }}>LKR {totals.tProf.toLocaleString(undefined, {maximumFractionDigits:0})}</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div style={{ flex: 1 }}>
+                                {pageIndex === 0 && <h3 style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px', color: '#000000', borderBottom: '1px solid #000000', paddingBottom: '6px' }}>Sales Breakdown</h3>}
+                                <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', border: 'none' }}>
+                                    <thead>
+                                        <tr>
+                                            <th style={{ width: '15%', padding: '6px 0', fontSize: '8px', textTransform: 'uppercase', color: '#8E8E93', fontWeight: '600', borderBottom: '1px solid #E5E5EA', borderTop: 'none', letterSpacing: '0.5px' }}>Date & Invoice</th>
+                                            <th style={{ width: '28%', padding: '6px 0', fontSize: '8px', textTransform: 'uppercase', color: '#8E8E93', fontWeight: '600', borderBottom: '1px solid #E5E5EA', borderTop: 'none', letterSpacing: '0.5px' }}>Product / IMEI</th>
+                                            <th style={{ width: '5%', padding: '6px 0', fontSize: '8px', textTransform: 'uppercase', color: '#8E8E93', fontWeight: '600', borderBottom: '1px solid #E5E5EA', borderTop: 'none', textAlign: 'center', letterSpacing: '0.5px' }}>Qty</th>
+                                            <th style={{ width: '12%', padding: '6px 0', fontSize: '8px', textTransform: 'uppercase', color: '#8E8E93', fontWeight: '600', borderBottom: '1px solid #E5E5EA', borderTop: 'none', textAlign: 'right', letterSpacing: '0.5px' }}>Avg Cost</th>
+                                            <th style={{ width: '12%', padding: '6px 0', fontSize: '8px', textTransform: 'uppercase', color: '#8E8E93', fontWeight: '600', borderBottom: '1px solid #E5E5EA', borderTop: 'none', textAlign: 'right', letterSpacing: '0.5px' }}>Warranty</th>
+                                            <th style={{ width: '15%', padding: '6px 0', fontSize: '8px', textTransform: 'uppercase', color: '#8E8E93', fontWeight: '600', borderBottom: '1px solid #E5E5EA', borderTop: 'none', textAlign: 'right', letterSpacing: '0.5px' }}>Selling Price</th>
+                                            <th style={{ width: '13%', padding: '6px 0', fontSize: '8px', textTransform: 'uppercase', color: '#8E8E93', fontWeight: '600', borderBottom: '1px solid #E5E5EA', borderTop: 'none', textAlign: 'right', letterSpacing: '0.5px' }}>Profit</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {chunk.length === 0 ? (
+                                            <tr><td colSpan="7" style={{ padding: '30px 0', textAlign: 'center', fontSize: '11px', fontStyle: 'italic', color: '#8E8E93' }}>No sales data found for the selected period.</td></tr>
+                                        ) : (
+                                            chunk.map((log, i) => {
+                                                const isCredit = log.isCredit;
+                                                const isIssue = log.tType === 'Issue';
+                                                
+                                                let rowBg = 'transparent';
+                                                let mainText = '#000000';
+                                                let subText = '#8E8E93';
+
+                                                if (isCredit) { rowBg = '#FDF2F8'; mainText = '#BE185D'; subText = '#EC4899'; } 
+
+                                                return (
+                                                    <tr key={i} style={{ backgroundColor: rowBg }}>
+                                                        <td style={{ padding: '10px 4px', borderBottom: '1px solid #F2F2F7', fontSize: '10px', verticalAlign: 'top', wordWrap: 'break-word' }}>
+                                                            <div style={{ fontWeight: '600', color: mainText }}>{log.dateStr.split(',')[0]}</div>
+                                                            <div style={{ color: subText, fontSize: '8px', marginTop: '2px' }}>{log.invoiceId}</div>
+                                                            {log.clientName && (
+                                                                <div style={{ marginTop: '3px' }}>
+                                                                    <div style={{ color: isCredit ? '#BE185D' : (log.isPartnerSale ? '#16A34A' : '#007aff'), fontSize: '8px', fontWeight: '800', textTransform: 'uppercase' }}>
+                                                                        {log.clientName}
+                                                                    </div>
+                                                                    <div style={{ color: isCredit ? '#BE185D' : (log.isPartnerSale ? '#16A34A' : '#007aff'), fontSize: '7px', fontWeight: 'bold', marginTop: '1px', textTransform: 'uppercase' }}>
+                                                                        {log.isPartnerSale ? '[SOLD]' : (isIssue ? '[ISSUED]' : '[CREDIT]')}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td style={{ padding: '10px 4px', borderBottom: '1px solid #F2F2F7', fontSize: '10px', verticalAlign: 'top', wordWrap: 'break-word' }}>
+                                                            <div style={{ fontWeight: '600', color: mainText }}>
+                                                                {log.name}
+                                                            </div>
+                                                            <div style={{ color: subText, fontSize: '8px', fontFamily: 'monospace', marginTop: '2px' }}>{log.imei}</div>
+                                                        </td>
+                                                        <td style={{ padding: '10px 4px', borderBottom: '1px solid #F2F2F7', fontSize: '10px', textAlign: 'center', fontWeight: '600', color: mainText, verticalAlign: 'top' }}>{log.qty}</td>
+                                                        <td style={{ padding: '10px 4px', borderBottom: '1px solid #F2F2F7', fontSize: '10px', textAlign: 'right', color: subText, verticalAlign: 'top' }}>{log.cost === 0 ? '0' : log.cost.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                                        <td style={{ padding: '10px 4px', borderBottom: '1px solid #F2F2F7', fontSize: '10px', textAlign: 'right', color: mainText, verticalAlign: 'top', fontWeight: '500' }}>{log.extWarrantyRev > 0 ? `+${log.extWarrantyRev.toLocaleString(undefined, {maximumFractionDigits:0})}` : (isCredit ? '0' : '-')}</td>
+                                                        <td style={{ padding: '10px 4px', borderBottom: '1px solid #F2F2F7', fontSize: '10px', textAlign: 'right', color: mainText, verticalAlign: 'top', fontWeight: '600' }}>{log.netRev === 0 ? '0' : (log.netRev * log.qty).toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                                        <td style={{ padding: '10px 4px', borderBottom: '1px solid #F2F2F7', fontSize: '10px', textAlign: 'right', fontWeight: '700', color: isCredit ? '#BE185D' : (log.itemProfit > 0 ? '#34C759' : (log.itemProfit < 0 ? '#FF3B30' : '#000000')), verticalAlign: 'top' }}>
+                                                            {log.itemProfit > 0 && !isCredit ? '+' : ''}{log.itemProfit === 0 ? '0' : (log.itemProfit * log.qty).toLocaleString(undefined, {maximumFractionDigits:0})}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Grand Totals at the bottom of the LAST page */}
+                            {pageIndex === chunks.length - 1 && logs.length > 0 && (
+                                <table style={{ width: '100%', marginTop: 'auto', borderCollapse: 'collapse' }}>
+                                    <tbody>
+                                        <tr>
+                                            <td style={{ padding: '16px 0', fontSize: '10px', fontWeight: '700', textAlign: 'right', textTransform: 'uppercase', color: '#000000', letterSpacing: '0.5px', borderTop: '2px solid #000000' }}>Grand Totals:</td>
+                                            <td style={{ width: '5%', padding: '16px 0', fontSize: '12px', fontWeight: '700', textAlign: 'center', color: '#000000', borderTop: '2px solid #000000' }}>{totals.tQty}</td>
+                                            <td style={{ width: '12%', padding: '16px 0', fontSize: '12px', fontWeight: '700', textAlign: 'right', color: '#000000', borderTop: '2px solid #000000' }}>{totals.tCost.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                            <td style={{ width: '12%', padding: '16px 0', fontSize: '12px', fontWeight: '700', textAlign: 'right', color: '#000000', borderTop: '2px solid #000000' }}>{totals.tExt > 0 ? `+${totals.tExt.toLocaleString(undefined, {maximumFractionDigits:0})}` : '-'}</td>
+                                            <td style={{ width: '15%', padding: '16px 0', fontSize: '12px', fontWeight: '700', textAlign: 'right', color: '#000000', borderTop: '2px solid #000000' }}>{totals.tRev.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                            <td style={{ width: '13%', padding: '16px 0', fontSize: '12px', fontWeight: '800', textAlign: 'right', color: totals.tProf < 0 ? '#FF3B30' : '#34C759', borderTop: '2px solid #000000' }}>{totals.tProf > 0 ? '+' : ''}{totals.tProf.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            )}
+
+                            <div style={{ position: 'absolute', bottom: '15mm', left: 0, width: '100%', textAlign: 'center', fontSize: '8px', color: '#C7C7CC', textTransform: 'uppercase', letterSpacing: '0.2em', fontWeight: '600' }}>
+                                ICON MOBILE &bull; CONFIDENTIAL
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        const ClientsView = ({ clients, setView, onLogout }) => {
+            const [search, setSearch] = useState("");
+            const [selectedClient, setSelectedClient] = useState(null);
+            const [toastMsg, setToastMsg] = useState("");
+
+            const [dateFilter, setDateFilter] = useState("all");
+            const [typeFilter, setTypeFilter] = useState("all");
+            const [customStart, setCustomStart] = useState("");
+            const [customEnd, setCustomEnd] = useState("");
+
+            const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(""), 3000); };
+
+            const filtered = useMemo(() => {
+                let result = clients;
+
+                if (search.trim()) {
+                    const searchTerms = search.toLowerCase().trim().split(/\s+/);
+                    result = result.filter(c => {
+                        const imeis = (c.purchasedItems || []).map(item => item.displayImei || item["IMEI or Item Code"] || "").join(" ");
+                        const combined = `${c.name} ${c.invoiceId} ${c.phone} ${c.email} ${imeis}`.toLowerCase();
+                        return searchTerms.every(term => combined.includes(term));
+                    });
+                }
+
+                if (typeFilter !== 'all') {
+                    result = result.filter(c => {
+                        const cType = c.transactionType || 'Sale';
+                        if (typeFilter === 'sale') return cType === 'Sale';
+                        if (typeFilter === 'issue') return cType === 'Issue';
+                        if (typeFilter === 'return') return cType === 'Return';
+                        return true;
+                    });
+                }
+
+                if (dateFilter !== 'all') {
+                    const now = new Date();
+                    result = result.filter(c => {
+                        if (!c.date) return false;
+                        const cDate = parseSmartDate(c.date);
+                        if (isNaN(cDate.getTime())) return false;
+
+                        if (dateFilter === 'today') return cDate.toDateString() === now.toDateString();
+                        if (dateFilter === 'week') { const pastWeek = new Date(now); pastWeek.setDate(pastWeek.getDate() - 7); return cDate >= pastWeek; }
+                        if (dateFilter === 'month') return cDate.getMonth() === now.getMonth() && cDate.getFullYear() === now.getFullYear();
+                        if (dateFilter === 'year') return cDate.getFullYear() === now.getFullYear();
+                        if (dateFilter === 'custom') {
+                            if (!customStart && !customEnd) return true;
+                            let match = true;
+                            if (customStart) { const s = new Date(customStart); s.setHours(0,0,0,0); match = match && cDate >= s; }
+                            if (customEnd) { const e = new Date(customEnd); e.setHours(23,59,59,999); match = match && cDate <= e; }
+                            return match;
+                        }
+                        return true;
+                    });
+                }
+                return result;
+            }, [clients, search, dateFilter, typeFilter, customStart, customEnd]);
+
+            const copyInvoiceLink = (id) => {
+                const link = window.IconAPI.getShareUrl(`/invoice.html?id=${encodeURIComponent(id || '')}`);
+                navigator.clipboard.writeText(link).then(() => showToast(`✅ Invoice link copied!`));
+            };
+
+            const shareWhatsApp = (clientData) => {
+                let phone = clientData.phone.replace(/[^0-9+]/g, '');
+                if (phone.startsWith('0') && phone.length === 10) phone = '94' + phone.substring(1);
+                else if (phone.startsWith('+')) phone = phone.substring(1);
+                const link = window.IconAPI.getShareUrl(`/invoice.html?id=${encodeURIComponent(clientData.invoiceId || '')}`);
+                const msg = `Hello ${clientData.name},\n\nThank you for your transaction!\nView your digital document here:\n${link}`;
+                window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`, '_blank');
+            };
+
+            return (
+                <div className="flex flex-col h-full w-full">
+                    {/* Admin Header with Navigation */}
+                    <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 shrink-0 z-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center shadow-sm">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-gray-100 text-gray-900 rounded-xl flex items-center justify-center shrink-0"><Icons.Users /></div>
+                            <div><h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">Client Database</h1><p className="text-[11px] font-medium text-gray-500">Manage customers and view past orders.</p></div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                            <div className="flex p-1 bg-gray-100 rounded-xl shrink-0 border border-gray-200 self-center overflow-x-auto">
+                                <button onClick={() => setView('list')} className="whitespace-nowrap flex-1 sm:flex-none pro-button ghost px-4 py-1.5 text-xs rounded-lg">Inventory Data</button>
+                                <button className="whitespace-nowrap flex-1 sm:flex-none pro-button ghost active px-4 py-1.5 text-xs rounded-lg">Clients</button>
+                                <button onClick={() => setView('analytics')} className="whitespace-nowrap flex-1 sm:flex-none pro-button ghost px-4 py-1.5 text-xs flex items-center gap-1.5 rounded-lg"><Icons.Chart /> Analytics</button>
+                            </div>
+                            <button type="button" onClick={onLogout} className="pro-button secondary px-3 py-1.5 text-xs rounded-lg text-gray-600 hover:text-red-600 border-gray-200">Logout</button>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col h-full w-full p-6 relative overflow-y-auto">
+                        {toastMsg && (
+                            <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[110] toast-animate">
+                                <div className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl font-bold text-sm flex items-center gap-2">{toastMsg}</div>
+                            </div>
+                        )}
+
+                        <div className="flex flex-col xl:flex-row xl:items-center gap-4 mb-6 bg-white p-4 rounded-3xl shadow-sm border border-gray-200">
+                            <div className="relative flex-1 min-w-[250px]">
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"><Icons.Search /></span>
+                                <input type="text" placeholder="Smart Search Clients & Orders..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full bg-gray-50 border border-gray-200 pl-11 pr-4 py-2.5 rounded-2xl focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 text-sm transition-all" />
+                            </div>
+                            
+                            <div className="flex flex-wrap items-center gap-3">
+                                <div className="flex items-center bg-gray-50 p-1.5 rounded-2xl border border-gray-200">
+                                    <div className="text-gray-400 pl-2 pr-1"><Icons.Filter /></div>
+                                    <select className="bg-transparent text-sm font-semibold text-gray-700 outline-none py-1.5 pr-2 cursor-pointer" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
+                                        <option value="all">All Transactions</option><option value="sale">Sales</option><option value="issue">Partner Issued</option><option value="return">Partner Returned</option>
+                                    </select>
+                                </div>
+
+                                <div className="flex items-center bg-gray-50 p-1.5 rounded-2xl border border-gray-200">
+                                    <div className="text-gray-400 pl-2 pr-1"><Icons.Calendar /></div>
+                                    <select className="bg-transparent text-sm font-semibold text-gray-700 outline-none py-1.5 pr-2 cursor-pointer" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}>
+                                        <option value="all">All Time</option><option value="today">Today</option><option value="week">Past 7 Days</option><option value="month">This Month</option><option value="year">This Year</option><option value="custom">Custom Range...</option>
+                                    </select>
+                                </div>
+
+                                {dateFilter === 'custom' && (
+                                    <div className="flex items-center gap-2 fade-in bg-blue-50 p-1.5 rounded-2xl border border-blue-100">
+                                        <input type="date" className="bg-white border border-blue-200 text-blue-700 rounded-xl py-1.5 px-3 text-xs font-bold outline-none" value={customStart} onChange={e=>setCustomStart(e.target.value)} />
+                                        <span className="text-blue-400 font-bold text-[10px] uppercase">To</span>
+                                        <input type="date" className="bg-white border border-blue-200 text-blue-700 rounded-xl py-1.5 px-3 text-xs font-bold outline-none" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        
+                        <div className="flex justify-between items-center mb-4 px-2">
+                            <h3 className="text-sm font-bold text-gray-700">Showing {filtered.length} Records</h3>
+                        </div>
+
+                        <div className="flex-1 bg-white border border-gray-200 rounded-2xl overflow-hidden flex flex-col shadow-sm">
+                            <div className="overflow-x-auto flex-1">
+                                <table className="w-full text-left border-collapse whitespace-nowrap">
+                                    <thead className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-500 font-bold sticky top-0 z-10 shadow-sm">
+                                        <tr>
+                                            <th className="px-6 py-4 border-b border-gray-200">Client / Partner Name</th>
+                                            <th className="px-6 py-4 border-b border-gray-200">Contact Details</th>
+                                            <th className="px-6 py-4 border-b border-gray-200">Invoice Ref</th>
+                                            <th className="px-6 py-4 border-b border-gray-200">Date</th>
+                                            <th className="px-6 py-4 border-b border-gray-200 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 text-sm text-gray-700">
+                                        {filtered.map((client, i) => {
+                                            const isCredit = String(client.paymentMethod).toLowerCase() === 'credit';
+                                            const tType = client.transactionType || 'Sale';
+                                            let typeBadge = null;
+                                            if (tType === 'Issue') typeBadge = <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase bg-blue-100 text-blue-700 border border-blue-200">Issued</span>;
+                                            else if (tType === 'Return') typeBadge = <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase bg-orange-100 text-orange-700 border border-orange-200">Returned</span>;
+
+                                            return (
+                                            <tr key={i} className={`transition-colors ${isCredit ? 'bg-pink-50 hover:bg-pink-100' : 'hover:bg-gray-50'}`}>
+                                                <td className="px-6 py-4"><div className="flex items-center"><span className={`font-bold ${isCredit ? 'text-pink-900' : 'text-gray-900'}`}>{client.name}</span>{typeBadge}{isCredit && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase bg-pink-200 text-pink-800 border border-pink-300">Credit</span>}</div></td>
+                                                <td className="px-6 py-4"><div className={`${isCredit ? 'text-pink-900' : 'text-gray-900'} font-medium`}>{client.phone}</div>{client.email && <div className="text-xs text-gray-500">{client.email}</div>}</td>
+                                                <td className="px-6 py-4 font-mono text-black bg-white/50 px-2 rounded-md font-medium border border-gray-100">{client.invoiceId}</td>
+                                                <td className="px-6 py-4 text-gray-500">{client.date}</td>
+                                                <td className="px-6 py-4 text-right font-bold text-gray-900">
+                                                    <button type="button" onClick={() => setSelectedClient(client)} className="pro-button secondary px-3 py-1.5 text-xs"><Icons.Eye /> View Details</button>
+                                                </td>
+                                            </tr>
+                                        )})}
+                                        {filtered.length === 0 && (<tr><td colSpan="5" className="px-6 py-16 text-center text-gray-500 font-medium text-lg">No records match your filters.</td></tr>)}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {selectedClient && (
+                            <div className="fixed inset-0 glass-overlay z-[70] flex items-center justify-center p-4">
+                                <div className="bg-white w-full max-w-4xl rounded-[24px] shadow-2xl flex flex-col max-h-[85vh] overflow-hidden border border-gray-200">
+                                    <div className="px-8 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                                        <div className="flex items-center gap-3">
+                                            <h3 className="font-bold text-lg text-gray-900">Transaction Details</h3>
+                                            <span className="bg-gray-200 text-black px-2 py-0.5 rounded text-sm font-mono border border-gray-300">{selectedClient.invoiceId}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button type="button" onClick={() => copyInvoiceLink(selectedClient.invoiceId)} className="pro-button secondary px-3 py-1.5 text-xs text-gray-600"><Icons.Link /> Copy Link</button>
+                                            <button type="button" onClick={() => shareWhatsApp(selectedClient)} className="pro-button primary px-3 py-1.5 text-xs bg-[#25D366] hover:bg-[#128C7E] border-transparent"><Icons.WhatsApp /> Share</button>
+                                            <button type="button" onClick={() => setSelectedClient(null)} className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-300 ml-2">✕</button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="p-8 overflow-y-auto flex-1 bg-gray-50/30">
+                                        <div className="grid grid-cols-3 gap-6 mb-8">
+                                            <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
+                                                <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400 mb-1.5">Client / Partner</p>
+                                                <p className="font-bold text-gray-900 text-lg leading-tight mb-1">{selectedClient.name}</p>
+                                                <p className="text-sm font-medium text-gray-600">{selectedClient.phone}</p>
+                                                {selectedClient.email && <p className="text-xs text-gray-500 mt-0.5">{selectedClient.email}</p>}
+                                            </div>
+                                            <div className={`bg-white p-5 rounded-2xl border shadow-sm ${String(selectedClient.paymentMethod).toLowerCase() === 'credit' ? 'border-pink-300 bg-pink-50' : 'border-gray-200'}`}>
+                                                <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400 mb-1.5">Transaction Info</p>
+                                                <p className="font-medium text-gray-900 text-sm mb-1.5"><span className="text-gray-500 w-16 inline-block">Date:</span> {selectedClient.date}</p>
+                                                <p className="font-medium text-gray-900 text-sm"><span className="text-gray-500 w-16 inline-block">Method:</span> <span className={String(selectedClient.paymentMethod).toLowerCase() === 'credit' ? 'text-pink-600 font-bold' : ''}>{selectedClient.paymentMethod || 'N/A'}</span></p>
+                                            </div>
+                                            <div className="bg-gray-100 p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-center items-end">
+                                                <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-1.5">Total Amount</p>
+                                                <p className={`font-black text-3xl tracking-tight ${String(selectedClient.paymentMethod).toLowerCase() === 'credit' ? 'text-pink-600' : 'text-black'}`}>LKR {(selectedClient.totalPrice || selectedClient.total || 0).toLocaleString()}</p>
+                                                {selectedClient.discount > 0 && <p className="text-xs text-red-500 font-bold mt-1">Discount Applied: LKR {selectedClient.discount.toLocaleString()}</p>}
+                                            </div>
+                                        </div>
+
+                                        <h4 className="font-bold text-gray-900 mb-3 uppercase tracking-widest text-[10px] ml-1">Processed Items</h4>
+                                        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                                            <table className="w-full text-left text-sm">
+                                                <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 text-[10px] uppercase tracking-wider">
+                                                    <tr><th className="px-5 py-3 font-bold w-[30%]">Item</th><th className="px-5 py-3 font-bold w-[20%]">ID</th><th className="px-5 py-3 font-bold w-[35%]">Warranty Status</th><th className="px-5 py-3 font-bold text-right w-[15%]">Price</th></tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {selectedClient.purchasedItems && selectedClient.purchasedItems.length > 0 ? (
+                                                        selectedClient.purchasedItems.map((item, idx) => {
+                                                            const itemDiscount = parseFloat(item.itemDiscount) || 0;
+                                                            let basePrice = parseFloat(item.Price) || 0;
+                                                            let extPrice = parseFloat(item.warranty?.extendedPrice) || 0;
+                                                            let acPrice = parseFloat(item.warranty?.appleCarePrice) || 0;
+                                                            let finalSellingPrice = parseFloat(item.finalPrice);
+                                                            if(isNaN(finalSellingPrice)) finalSellingPrice = basePrice + extPrice + acPrice - itemDiscount;
+
+                                                            const hasSoft = item.warranty && item.warranty.software && item.warranty.software !== 'None';
+                                                            const hasGlob = item.warranty && item.warranty.global && item.warranty.global !== 'None';
+                                                            const hasExt = item.warranty && item.warranty.extended && item.warranty.extended !== 'None';
+                                                            const hasAc = item.warranty && item.warranty.appleCare && item.warranty.appleCare !== 'None';
+                                                            const noWarrantyAtAll = !hasSoft && !hasGlob && !hasExt && !hasAc;
+
+                                                            const formatW = (l, v, e) => (!v || v==='None' ? null : <div className="flex justify-between items-center bg-gray-50 px-3 py-2 rounded-md mb-1"><span className="font-bold text-gray-500 text-[10px] uppercase tracking-wider">{l}</span><span className={`font-semibold text-xs ${isWarrantyExpired(e||v) ? 'text-red-500' : 'text-gray-900'}`}>{e||v}</span></div>);
+
+                                                            return (
+                                                                <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                                    <td className="px-5 py-4 align-top">
+                                                                        <div className={`font-bold text-[11px] leading-tight mb-1 ${item.isExchange ? 'text-green-700' : 'text-gray-900'}`}>
+                                                                            {item.Brand} {item.Model}
+                                                                        </div>
+                                                                        {!item.isExchange && <p className="text-[11px] font-medium text-gray-500 mt-0.5">{formatSpecsDisplay(item.Specs)} • {item.Color}</p>}
+                                                                    </td>
+                                                                    <td className="px-5 py-4 align-top font-mono text-xs text-gray-600 break-all">{item.unitImei || item.displayImei || item["IMEI or Item Code"]}</td>
+                                                                    <td className="px-5 py-4 align-top text-[11px]">
+                                                                        {!item.isExchange && selectedClient.transactionType !== 'Return' ? (
+                                                                            <div className="space-y-1">
+                                                                                {formatW("Software Warranty", item.warranty?.software, item.warranty?.softwareEnd)}
+                                                                                {formatW("General Warranty", item.warranty?.global, item.warranty?.globalEnd)}
+                                                                                {hasExt && <div className="flex flex-col bg-blue-50/50 px-3 py-2 rounded-md mb-1 border border-blue-100/50"><div className="flex justify-between items-center w-full"><span className="font-bold text-blue-600 text-[10px] uppercase tracking-wider">Extended Warranty</span><span className={`font-semibold text-xs text-gray-900`}>{item.warranty?.extendedEnd || item.warranty?.extended}</span></div><div className="text-[9px] text-gray-500 text-right mt-0.5 font-medium flex justify-end gap-1"><span>{item.warranty?.extended}</span> {extPrice > 0 && <span className="text-blue-500 font-bold">(+LKR {extPrice.toLocaleString()})</span>}</div></div>}
+                                                                                {formatW("Apple Care", item.warranty?.appleCare, item.warranty?.appleCareEnd)}
+                                                                                {noWarrantyAtAll && <span className="text-gray-400 text-xs font-medium">No Warranty Issued</span>}
+                                                                            </div>
+                                                                        ) : <span className="text-gray-400 text-xs italic">N/A</span>}
+                                                                    </td>
+                                                                    <td className="px-5 py-4 align-top text-right font-bold text-gray-900">
+                                                                        {itemDiscount > 0 ? (
+                                                                            <div className="flex flex-col items-end">
+                                                                                <span className="text-[10px] text-red-500 line-through">LKR {(basePrice+extPrice).toLocaleString()}</span>
+                                                                                <span className="text-sm">LKR {finalSellingPrice.toLocaleString()}</span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span>LKR {finalSellingPrice.toLocaleString()}</span>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })
+                                                    ) : (
+                                                        <tr><td colSpan="4" className="p-8 text-center text-gray-500">No detailed item records found for this older invoice.</td></tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [passwordInput, setPasswordInput] = useState("");
+            const [loginAttempts, setLoginAttempts] = useState(0);
+            const [lockoutTime, setLockoutTime] = useState(() => {
+                const stored = localStorage.getItem('admin_icon_lockout');
+                return stored ? parseInt(stored) : null;
+            });
+            const [timeRemaining, setTimeRemaining] = useState(0);
+
+            const [view, setView] = useState('list'); 
+            const [inventory, setInventory] = useState([]);
+            const [clients, setClients] = useState([]);
+            const [assetSummary, setAssetSummary] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [loginLoading, setLoginLoading] = useState(false);
+            const [actionLoading, setActionLoading] = useState(false);
+            const [toastMsg, setToastMsg] = useState("");
+            const [searchQuery, setSearchQuery] = useState("");
+            const [detailsModalItem, setDetailsModalItem] = useState(null);
+            
+            const localNow = new Date();
+            const initY = localNow.getFullYear();
+            const initM = String(localNow.getMonth() + 1).padStart(2, '0');
+            const initD = String(localNow.getDate()).padStart(2, '0');
+            
+            const jan4 = new Date(initY, 0, 4);
+            const dow = jan4.getDay() || 7;
+            const week1Start = jan4.getTime() - (dow - 1) * 86400000;
+            const weekNum = Math.floor(((localNow.getTime() - week1Start) / 86400000) / 7) + 1;
+
+            const [logFilter, setLogFilter] = useState({
+                type: 'all', date: `${initY}-${initM}-${initD}`, week: `${initY}-W${String(weekNum).padStart(2, '0')}`, month: `${initY}-${initM}`, year: `${initY}`
+            });
+
+            const initialForm = { Type: "Mobile Phone", Category: "Smartphones", Brand: "", Model: "", IMEI: "", Color: "", Price: "", OfferPrice: "", Quantity: "1", Status: "Available", Notes: "", Suppliers: [{ name: "", cost: "", qty: "1", units: [{imei: '', status: 'Available'}] }] };
+            const initialSpecs = { RAM: "", ROM: "", Other: "" };
+
+            const [form, setForm] = useState(initialForm);
+            const [specs, setSpecs] = useState(initialSpecs);
+            const [isEditing, setIsEditing] = useState(false);
+
+            const [showQR, setShowQR] = useState(false);
+            const [qrUrl, setQrUrl] = useState("");
+            const scannerRef = useRef(null);
+            const viewRef = useRef(view);
+
+            useEffect(() => { viewRef.current = view; }, [view]);
+
+            const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(""), 3000); };
+
+            useEffect(() => {
+                if (lockoutTime) {
+                    const interval = setInterval(() => {
+                        const remaining = Math.ceil((lockoutTime - Date.now()) / 1000);
+                        if (remaining <= 0) {
+                            setLockoutTime(null);
+                            setLoginAttempts(0);
+                            localStorage.removeItem('admin_icon_lockout');
+                            setTimeRemaining(0);
+                            clearInterval(interval);
+                        } else {
+                            setTimeRemaining(remaining);
+                        }
+                    }, 1000);
+                    return () => clearInterval(interval);
+                }
+            }, [lockoutTime]);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                if (loginLoading || (lockoutTime && Date.now() < lockoutTime)) return;
+                if (!passwordInput) { showToast("Please enter your password."); return; }
+
+                setLoginLoading(true);
+                try {
+                    const result = await window.IconAPI.login('admin', passwordInput);
+                    if (!result || result.success !== true) {
+                        throw new Error(result?.error || result?.message || 'Incorrect password.');
+                    }
+                    setIsLoggedIn(true);
+                    setLoginAttempts(0);
+                    localStorage.removeItem('admin_icon_lockout');
+                } catch (error) {
+                    const newAttempts = loginAttempts + 1;
+                    setLoginAttempts(newAttempts);
+                    if (newAttempts >= 3) {
+                        const lockUntil = Date.now() + 5 * 60 * 1000; 
+                        setLockoutTime(lockUntil);
+                        localStorage.setItem('admin_icon_lockout', lockUntil.toString());
+                        showToast("Too many failed attempts. Portal locked for 5 minutes.");
+                    } else {
+                        showToast(`${error?.message || 'Login failed.'} ${3 - newAttempts} attempts remaining.`);
+                    }
+                } finally {
+                    setPasswordInput("");
+                    setLoginLoading(false);
+                }
+            };
+
+            const handleLogout = async () => {
+                try { await window.IconAPI.logout(); }
+                catch (error) { console.warn('Server logout failed:', error); }
+                finally { setIsLoggedIn(false); }
+            };
+
+            const dynamicSuppliers = useMemo(() => {
+                const suppliers = new Set();
+                inventory.forEach(item => {
+                    if (item.Units && item.Units.length > 0) {
+                        item.Units.forEach(u => { if (u.supplier) suppliers.add(u.supplier.trim()); });
+                    }
+                    if (item.Suppliers) { item.Suppliers.forEach(s => { if (s.name) suppliers.add(s.name.trim()); }); } 
+                    else if (item.Supplier) { suppliers.add(item.Supplier.trim()); }
+                });
+                return [...suppliers].sort();
+            }, [inventory]);
+
+            const fetchData = async (silent = false) => {
+                if (!silent) setLoading(true);
+                try {
+                    const snapshot = await window.IconAPI.getSnapshot();
+                    if (!snapshot || snapshot.success !== true || !snapshot.data) {
+                        throw new Error(snapshot?.error || snapshot?.message || 'Local database returned an invalid snapshot.');
+                    }
+                    const snapshotData = snapshot.data;
+                    const invData = Array.isArray(snapshotData.inventory) ? snapshotData.inventory : [];
+                    const transactionData = Array.isArray(snapshotData.transactions) ? snapshotData.transactions : [];
+                    setInventory([...invData]);
+                    setClients([...transactionData]);
+                    setAssetSummary(snapshotData.assets && typeof snapshotData.assets === 'object' ? {...snapshotData.assets} : null);
+                    adminSafeStorage.set(ADMIN_DATA_CACHE_KEY, JSON.stringify({ ...snapshotData, savedAt: Date.now() }));
+                    if (!silent) showToast(`Local SQLite: ${invData.length} inventory records loaded.`);
+                } catch (err) {
+                    console.error('Local data load failed:', err);
+                    try {
+                        const cached = JSON.parse(adminSafeStorage.get(ADMIN_DATA_CACHE_KEY, 'null'));
+                        if (!cached || !Array.isArray(cached.inventory)) throw new Error('No usable cache found.');
+                        setInventory([...cached.inventory]);
+                        setClients([...(Array.isArray(cached.transactions) ? cached.transactions : [])]);
+                        setAssetSummary(cached.assets && typeof cached.assets === 'object' ? {...cached.assets} : null);
+                        if (!silent) showToast('LAN server unavailable. Showing read-only cached data.');
+                    } catch (cacheErr) {
+                        if (!silent) showToast(`Failed to load system data: ${err?.message || err}`);
+                    }
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => { 
+                if (!isLoggedIn) return undefined;
+                let active = true;
+                fetchData();
+                const refreshSilently = () => { if (active) fetchData(true); };
+                const unsubscribe = window.IconAPI.subscribe(refreshSilently);
+                window.addEventListener('online', refreshSilently);
+                window.addEventListener('focus', refreshSilently);
+                return () => {
+                    active = false;
+                    if (typeof unsubscribe === 'function') unsubscribe();
+                    window.removeEventListener('online', refreshSilently);
+                    window.removeEventListener('focus', refreshSilently);
+                    if (scannerRef.current) scannerRef.current.destroy();
+                    scannerRef.current = null;
+                };
+            }, [isLoggedIn]);
+
+            const analytics = useMemo(() => {
+                let chartTrendsMap = {}; 
+                let itemizedLogs = [];
+                
+                const imeiGroups = {};
+                
+                let logCounter = 0;
+                [...clients].reverse().forEach((c) => {
+                    let rawDateStr = String(c.date || c.saleDateISO || "").replace(/["']/g, "").trim();
+                    let dObj = parseSmartDate(rawDateStr);
+                    let saleTime = dObj.getTime();
+                    let sigs = generateDateSignatures(dObj);
+
+                    const tType = c.transactionType || 'Sale';
+                    const isCredit = String(c.paymentMethod).toLowerCase() === 'credit';
+                    const items = c.purchasedItems || c.items || [];
+                    
+                    let globalDiscount = parseFloat(c.discount) || 0;
+                    let sumItemDiscounts = 0;
+                    items.forEach(i => { if(!i.isExchange) sumItemDiscounts += (parseFloat(i.itemDiscount) || 0) * (parseInt(i.cartQty) || 1); });
+                    let pureGlobalDiscount = Math.max(0, globalDiscount - sumItemDiscounts);
+                    let validItemsCount = items.filter(i => !i.isExchange).reduce((sum, i) => sum + (parseInt(i.cartQty) || 1), 0);
+                    let globalDiscPerItem = validItemsCount > 0 ? (pureGlobalDiscount / validItemsCount) : 0;
+
+                    items.forEach(item => {
+                        if (item.isExchange) return;
+                        
+                        let imei = item.unitImei || item.displayImei || item["IMEI or Item Code"];
+                        if (!imei || imei === 'N/A') imei = 'ACC-' + Math.random().toString(36).substr(2, 9); 
+                        
+                        if (!imeiGroups[imei]) imeiGroups[imei] = [];
+                        
+                        let qty = parseInt(item.cartQty) || 1; 
+                        let sData = null;
+                        try { if (item["Notes (SALES)"]) sData = JSON.parse(item["Notes (SALES)"]); } catch(e) {}
+
+                        let cost = parseFloat(item.unitCost) || sData?.Cost || parseFloat(item.Suppliers?.[0]?.cost) || parseFloat(item.PurchasedPrice) || 0;
+                        let extP = parseFloat(item.warranty?.extendedPrice) || 0;
+                        let acP = parseFloat(item.warranty?.appleCarePrice) || 0;
+                        let itemDisc = parseFloat(item.itemDiscount) || 0;
+                        
+                        let finalSellingPrice = parseFloat(item.finalPrice);
+                        if (sData?.SoldPrice !== undefined) finalSellingPrice = parseFloat(sData.SoldPrice);
+                        if (isNaN(finalSellingPrice)) finalSellingPrice = (parseFloat(item.Price) || 0) + extP + acP - itemDisc;
+
+                        let netRevenuePerItem = finalSellingPrice - globalDiscPerItem;
+                        let totalItemRev = netRevenuePerItem * qty;
+                        let totalItemCost = cost * qty;
+                        let totalItemProfit = totalItemRev - totalItemCost;
+
+                        imeiGroups[imei].push({
+                            id: Math.random().toString(),
+                            invoiceId: c.invoiceId || 'N/A',
+                            dateStr: rawDateStr,
+                            parsedDate: saleTime,
+                            sigs: sigs,
+                            name: `${item.Brand || ''} ${item.Model || ''}`.trim() || item.Type || 'Item',
+                            imei: item.displayImei || item["IMEI or Item Code"] || 'N/A',
+                            qty, cost,
+                            extWarrantyRev: extP + acP,
+                            netRev: netRevenuePerItem, 
+                            itemProfit: totalItemProfit / qty,
+                            tType: tType,
+                            clientName: c.name,
+                            isCredit: isCredit,
+                            logOrder: logCounter++
+                        });
+                    });
+                });
+
+                const allValidDates = [];
+
+                Object.values(imeiGroups).forEach(history => {
+                    const latestTx = history[history.length - 1];
+                    if (latestTx.tType === 'Return') return; 
+                    
+                    let partnerName = null;
+                    history.forEach(tx => {
+                        if (tx.tType === 'Issue') partnerName = tx.clientName;
+                    });
+                    
+                    let displayClientName = '';
+                    let isPartnerSale = false;
+                    
+                    if (latestTx.tType === 'Issue') {
+                        displayClientName = latestTx.clientName;
+                    } else if (latestTx.tType === 'Sale') {
+                        if (partnerName) {
+                            displayClientName = partnerName; 
+                            isPartnerSale = true;
+                        }
+                    }
+                    
+                    latestTx.clientName = displayClientName;
+                    latestTx.isPartnerSale = isPartnerSale;
+                    
+                    itemizedLogs.push(latestTx);
+                    
+                    if (!latestTx.isCredit && latestTx.tType !== 'Issue') {
+                        allValidDates.push(latestTx.parsedDate);
+                    }
+                });
+
+                let useMonthly = false;
+                if (allValidDates.length > 0) {
+                    const minDate = Math.min(...allValidDates);
+                    const maxDate = Math.max(...allValidDates);
+                    const daysDiff = (maxDate - minDate) / (1000 * 60 * 60 * 24);
+                    useMonthly = daysDiff > 60; 
+                }
+
+                Object.values(imeiGroups).forEach(history => {
+                    const latestTx = history[history.length - 1];
+                    if (!latestTx.isCredit && latestTx.tType !== 'Issue' && latestTx.tType !== 'Return') {
+                        let key = useMonthly ? latestTx.sigs.monthlyStr : latestTx.sigs.dailyStr;
+                        if (!chartTrendsMap[key]) {
+                            chartTrendsMap[key] = { rev: 0, prof: 0, cost: 0, label: key, sortKey: key };
+                        }
+                        chartTrendsMap[key].rev += (latestTx.netRev * latestTx.qty);
+                        chartTrendsMap[key].prof += (latestTx.itemProfit * latestTx.qty);
+                        chartTrendsMap[key].cost += (latestTx.cost * latestTx.qty);
+                    }
+                });
+
+                const trendsArray = Object.values(chartTrendsMap).sort((a,b) => a.sortKey.localeCompare(b.sortKey));
+                
+                itemizedLogs.sort((a,b) => {
+                    if (b.parsedDate !== a.parsedDate) return b.parsedDate - a.parsedDate;
+                    return b.logOrder - a.logOrder; // secondary sort to ensure absolutely newest log is at the top
+                });
+                
+                return { trendsArray, itemizedLogs };
+            }, [clients]);
+
+            const filteredItemizedLogs = useMemo(() => {
+                let logs = analytics.itemizedLogs || [];
+                if (logFilter.type === 'daily' && logFilter.date) logs = logs.filter(l => l.sigs.dailyStr === logFilter.date);
+                else if (logFilter.type === 'weekly' && logFilter.week) logs = logs.filter(l => l.sigs.weeklyStr === logFilter.week);
+                else if (logFilter.type === 'monthly' && logFilter.month) logs = logs.filter(l => l.sigs.monthlyStr === logFilter.month);
+                else if (logFilter.type === 'yearly' && logFilter.year) logs = logs.filter(l => l.sigs.yearlyStr === logFilter.year);
+                return logs;
+            }, [analytics.itemizedLogs, logFilter]);
+
+            const filteredTotals = useMemo(() => {
+                let tRev=0, tCost=0, tProf=0, tExt = 0, tQty = 0;
+                filteredItemizedLogs.forEach(l => {
+                    if (!l.isCredit && l.tType !== 'Issue') {
+                        tRev += (l.netRev * l.qty); 
+                        tCost += (l.cost * l.qty); 
+                        tProf += (l.itemProfit * l.qty); 
+                        tExt += (l.extWarrantyRev * l.qty); 
+                        tQty += l.qty;
+                    }
+                });
+                return { tRev, tCost, tProf, tExt, tQty };
+            }, [filteredItemizedLogs]);
+
+
+            const stockReport = useMemo(() => {
+                let totalAssetsAmount = 0, stockSellingValue = 0, availableUnits = 0, soldUnits = 0, partnerUnits = 0;
+                inventory.forEach(item => {
+                    const price = parseFloat(item.OfferPrice || item.Price || 0) || 0;
+                    const defaultCost = parseFloat(item.PurchasedPrice || item.Cost || 0) || 0;
+                    const units = Array.isArray(item.Units) ? item.Units : [];
+                    if (units.length) {
+                        units.forEach(u => {
+                            const status = String(u.status || 'Available').toLowerCase();
+                            const cost = parseFloat(u.cost || defaultCost || 0) || 0;
+                            if (status === 'available' || status === 'in stock' || status === 'instock') { availableUnits++; totalAssetsAmount += cost; stockSellingValue += price; }
+                            else if (status === 'sold') soldUnits++;
+                            else if (status.startsWith('partner')) partnerUnits++;
+                        });
+                    } else {
+                        const qty = parseInt(item.Quantity || 0, 10) || 0;
+                        availableUnits += qty;
+                        totalAssetsAmount += qty * defaultCost;
+                        stockSellingValue += qty * price;
+                    }
+                });
+                let sellingIncomeAmount = 0, soldCostAmount = 0;
+                clients.forEach(c => {
+                    const type = String(c.transactionType || c.recordType || '').toLowerCase();
+                    if (type.includes('payment') || type.includes('return')) return;
+                    const amount = parseFloat(c.total || c.totalPrice || 0) || 0;
+                    sellingIncomeAmount += amount;
+                    const items = Array.isArray(c.purchasedItems) ? c.purchasedItems : Array.isArray(c.items) ? c.items : [];
+                    items.forEach(i => { soldCostAmount += (parseFloat(i.unitCost || i.cost || 0) || 0) * (parseInt(i.cartQty || i.quantity || 1, 10) || 1); });
+                });
+                const fallback = { totalAssetsAmount, stockSellingValue, sellingIncomeAmount, soldCostAmount, grossProfit: sellingIncomeAmount - soldCostAmount, availableUnits, soldUnits, partnerUnits, phoneProducts: 0, accessoryProducts: 0, otherProducts: 0, phoneUnits: 0, accessoryUnits: 0, otherUnits: 0, partnerCostValue: 0, partnerIssuedValue: 0, partnerPaymentsReceived: 0 };
+                if (!assetSummary) return fallback;
+                return {
+                    ...fallback,
+                    ...assetSummary,
+                    totalAssetsAmount: Number(assetSummary.stockCostValue || 0),
+                    sellingIncomeAmount: Number(assetSummary.netSalesRevenue || 0),
+                    soldCostAmount: Number(assetSummary.netSalesCost || 0),
+                    grossProfit: Number(assetSummary.grossProfit || 0),
+                    stockSellingValue: Number(assetSummary.stockSellingValue || 0),
+                    availableUnits: Number(assetSummary.availableUnits || 0),
+                    soldUnits: Number(assetSummary.soldUnits || 0),
+                    partnerUnits: Number(assetSummary.partnerUnits || 0)
+                };
+            }, [inventory, clients, assetSummary]);
+
+            const getFilterDetails = () => {
+                const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                let title = "All Time Sales Report"; let subtitle = "Complete historical data";
+                if (logFilter.type === 'daily' && logFilter.date) { const [y, m, d] = logFilter.date.split('-'); title = "Daily Report"; subtitle = `${months[parseInt(m)-1]} ${parseInt(d)}, ${y}`; }
+                else if (logFilter.type === 'weekly' && logFilter.week) { const [y, w] = logFilter.week.split('-W'); title = "Weekly Report"; subtitle = `Week ${w} of ${y}`; }
+                else if (logFilter.type === 'monthly' && logFilter.month) { const [y, m] = logFilter.month.split('-'); title = "Monthly Report"; subtitle = `${months[parseInt(m)-1]} ${y}`; }
+                else if (logFilter.type === 'yearly' && logFilter.year) { title = "Yearly Report"; subtitle = `Fiscal Year ${logFilter.year}`; }
+                return { title, subtitle };
+            };
+
+            const filteredInventory = useMemo(() => {
+                let results = inventory;
+                if (searchQuery) {
+                    const terms = searchQuery.toLowerCase().trim().split(/\s+/);
+                    results = inventory.filter(item => {
+                        const allImeis = item.Units ? item.Units.map(u => u.imei).join(" ") : "";
+                        const sups = item.Units ? item.Units.map(u => u.supplier).join(" ") : "";
+                        const combined = `${item.Brand} ${item.Model} ${item.IMEI} ${sups} ${allImeis} ${item.Category} ${item.Status}`.toLowerCase();
+                        return terms.every(t => combined.includes(t));
+                    });
+                }
+                
+                return [...results].sort((a, b) => {
+                    const aSold = String(a.Status).toLowerCase().includes('sold');
+                    const bSold = String(b.Status).toLowerCase().includes('sold');
+                    if (aSold && !bSold) return 1;
+                    if (!aSold && bSold) return -1;
+                    return 0;
+                });
+            }, [inventory, searchQuery]);
+
+            const handleEditClick = (item) => {
+                setIsEditing(true);
+                let ram = "", rom = "", other = "";
+                if (item.Specs && item.Specs.startsWith('{')) {
+                    try {
+                        const parsedSpecs = JSON.parse(item.Specs);
+                        ram = parsedSpecs.RAM || ""; rom = parsedSpecs.ROM || ""; other = parsedSpecs.Other || "";
+                    } catch(e) {}
+                } else if (item.Specs) { other = item.Specs; }
+
+                const supsMap = {};
+                (item.Units || []).forEach(u => {
+                    const key = `${u.supplier}_${u.cost}`;
+                    if (!supsMap[key]) supsMap[key] = { name: u.supplier, cost: u.cost, units: [] };
+                    supsMap[key].units.push(u);
+                });
+                let loadedSuppliers = Object.values(supsMap).map(s => ({ ...s, qty: s.units.length.toString() }));
+                if (loadedSuppliers.length === 0) loadedSuppliers = [{ name: "", cost: "", qty: "1", units: [{imei: '', status: 'Available'}] }];
+
+                setForm({
+                    Type: item.Type || "Mobile Phone", Category: item.Category || "", Brand: item.Brand || "", Model: item.Model || "", IMEI: item.IMEI || "", Color: item.Color || "", Price: item.Price || "", OfferPrice: item.OfferPrice || "", Quantity: item.Quantity || "1", Status: item.Status || "Available", Notes: item.Notes || "", 
+                    Suppliers: loadedSuppliers
+                });
+                setSpecs({ RAM: ram, ROM: rom, Other: other });
+                setView('form');
+            };
+
+            const handleAddNewClick = () => { setIsEditing(false); setForm(initialForm); setSpecs(initialSpecs); setView('form'); };
+            const handleCancel = () => { setView('list'); setForm(initialForm); setSpecs(initialSpecs); };
+
+            const handleChange = (e) => { setForm({ ...form, [e.target.name]: e.target.value }); };
+            const handleSpecChange = (e) => setSpecs({...specs, [e.target.name]: e.target.value});
+
+            const handleSupplierChange = (index, field, value) => {
+                const newSup = [...form.Suppliers]; 
+                newSup[index][field] = value;
+                
+                if (field === 'qty') {
+                    const num = parseInt(value) || 0;
+                    const currentUnits = newSup[index].units || [];
+                    let newUnits = [...currentUnits];
+                    if (num > currentUnits.length) {
+                        for(let i=currentUnits.length; i<num; i++) newUnits.push({ imei: '', status: 'Available', dateAdded: new Date().toISOString() });
+                    } else {
+                        newUnits = newUnits.slice(0, num);
+                    }
+                    newSup[index].units = newUnits;
+                }
+                
+                let totalQty = 0;
+                newSup.forEach(s => totalQty += (parseInt(s.qty) || 0));
+                
+                setForm({...form, Suppliers: newSup, Quantity: totalQty.toString(), Status: totalQty > 0 ? 'Available' : 'Sold'});
+            };
+            
+            const handleUnitImeiChange = (supIndex, unitIndex, value) => {
+                const newSup = [...form.Suppliers];
+                newSup[supIndex].units[unitIndex].imei = value;
+                setForm({...form, Suppliers: newSup});
+            };
+
+            const addSupplierRow = () => { setForm({ ...form, Suppliers: [...form.Suppliers, { name: "", cost: "", qty: "1", units: [{imei: '', status: 'Available', dateAdded: new Date().toISOString()}] }] }); };
+            const removeSupplierRow = (index) => {
+                const newSuppliers = form.Suppliers.filter((_, i) => i !== index);
+                let totalQty = 0;
+                newSuppliers.forEach(s => totalQty += (parseInt(s.qty) || 0));
+                setForm({ ...form, Suppliers: newSuppliers, Quantity: totalQty.toString(), Status: totalQty > 0 ? 'Available' : 'Sold' });
+            };
+
+            const startPeerServer = () => {
+                if (scannerRef.current) { setShowQR(true); return; }
+                const scanner = window.IconAPI.createScannerHost((data) => {
+                        if (view === 'form') {
+                            setForm(prevForm => {
+                                let updatedSuppliers = [...prevForm.Suppliers];
+                                let filled = false;
+                                for (let sIdx = 0; sIdx < updatedSuppliers.length; sIdx++) {
+                                    let sup = updatedSuppliers[sIdx];
+                                    for (let uIdx = 0; uIdx < sup.units.length; uIdx++) {
+                                        if (!sup.units[uIdx].imei && sup.units[uIdx].status !== 'Sold' && !String(sup.units[uIdx].status).startsWith('Partner')) {
+                                            let newUnits = [...sup.units];
+                                            newUnits[uIdx] = { ...newUnits[uIdx], imei: data };
+                                            updatedSuppliers[sIdx] = { ...sup, units: newUnits };
+                                            filled = true; break;
+                                        }
+                                    }
+                                    if (filled) break;
+                                }
+                                if (filled) { showToast(`🔍 Scanned Unit IMEI: ${data}`); return { ...prevForm, Suppliers: updatedSuppliers }; } 
+                                else if (!prevForm.IMEI) { showToast(`🔍 Scanned Group SKU: ${data}`); return { ...prevForm, IMEI: data }; } 
+                                else { showToast(`⚠️ Scanned ${data}, but no empty unit fields available.`); return prevForm; }
+                            });
+                        } else {
+                            setSearchQuery(data); showToast(`🔍 Searched: ${data}`);
+                        }
+                    }, () => { setShowQR(false); showToast("✅ Mobile Scanner Connected!"); });
+                setQrUrl(scanner.url); setShowQR(true);
+                scannerRef.current = scanner;
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!form.IMEI || !form.Brand || !form.Model || !form.Price) { showToast("❌ Group Code (SKU), Brand, Model, and Price required."); return; }
+                
+                let missingImei = false;
+                form.Suppliers.forEach(s => { s.units.forEach(u => { if (!u.imei) missingImei = true; }) });
+                if (missingImei) { showToast("❌ Please fill out all Individual Unit IMEIs."); return; }
+                
+                setActionLoading(true);
+
+                const specsObj = {};
+                if (specs.RAM && specs.RAM.trim().toLowerCase() !== "none") specsObj.RAM = specs.RAM.trim();
+                if (specs.ROM && specs.ROM.trim().toLowerCase() !== "none") specsObj.ROM = specs.ROM.trim();
+                if (specs.Other && specs.Other.trim() !== "") specsObj.Other = specs.Other.trim();
+
+                const unitsToSave = [];
+                form.Suppliers.forEach(sup => {
+                    sup.units.forEach(u => {
+                        unitsToSave.push({ imei: u.imei, supplier: sup.name, cost: parseFloat(sup.cost) || 0, dateAdded: u.dateAdded || new Date().toISOString(), status: u.status || 'Available' });
+                    });
+                });
+
+                const dataJsonObj = { Brand: form.Brand, Model: form.Model, Category: form.Category, Color: form.Color, Price: form.Price, OfferPrice: form.OfferPrice, Specs: Object.keys(specsObj).length > 0 ? JSON.stringify(specsObj) : "", Units: unitsToSave };
+                const finalItem = { "Select Phone or item": form.Type, "IMEI or Item Code": form.IMEI, "Status": form.Status, "Quantity": form.Quantity, "Notes": form.Notes, "DATA (JSON)": JSON.stringify(dataJsonObj) };
+
+                try {
+                    const action = isEditing ? 'update_item' : 'add_item';
+                    const res = await window.IconAPI.action({ action, item: finalItem });
+                    if (!res || res.success !== true) throw new Error(res?.error || res?.message || 'Inventory save failed.');
+                    showToast(`Successfully ${isEditing ? 'updated' : 'added'}!`);
+                    await fetchData(true);
+                    setView('list');
+                } catch (error) { showToast(`Local server error: ${error?.message || error}`); }
+                setActionLoading(false);
+            };
+
+            if (!isLoggedIn) {
+                return (
+                    <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center p-4">
+                        <div className="bg-white p-10 rounded-3xl shadow-xl w-full max-w-sm border border-gray-100 text-center">
+                            <div className="flex justify-center mb-6">
+                                <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center text-white text-3xl font-black shadow-lg">ICON</div>
+                            </div>
+                            <h2 className="text-2xl font-bold text-gray-900 mb-2">ADMIN ERP</h2>
+                            <p className="text-gray-500 text-sm mb-8">Enter your master password.</p>
+                            
+                            {lockoutTime && timeRemaining > 0 ? (
+                                <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-medium mb-4">
+                                    Locked for {Math.floor(timeRemaining / 60)}m {timeRemaining % 60}s.
+                                </div>
+                            ) : (
+                                <form onSubmit={handleLogin}>
+                                    <input 
+                                        type="password" placeholder="Password" 
+                                        className="pro-input px-4 py-3 mb-4 w-full text-center font-mono tracking-widest text-lg border border-gray-200 bg-gray-50 rounded-xl outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                                        value={passwordInput} onChange={e => setPasswordInput(e.target.value)} autoFocus
+                                    />
+                                    <button type="submit" disabled={loginLoading} className="pro-button black-btn w-full py-3.5 text-base shadow-[0_4px_14px_rgba(0,0,0,0.1)]">{loginLoading ? 'Checking…' : 'Unlock Portal'}</button>
+                                </form>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            if (view === 'analytics') {
+                const filterDetails = getFilterDetails();
+                return (
+                    <div className="h-screen bg-[#f2f2f7] flex flex-col relative overflow-auto sm:overflow-hidden print:h-auto print:overflow-visible">
+                        <PrintableAnalyticsReport logs={filteredItemizedLogs} totals={filteredTotals} filterTitle={filterDetails.title} filterSubtitle={filterDetails.subtitle} />
+                        <div className="no-print flex flex-col h-full overflow-hidden">
+                            <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 shrink-0 z-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center shadow-sm">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-gray-100 text-gray-800 rounded-xl flex items-center justify-center shrink-0"><Icons.Chart /></div>
+                                    <div><h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">Financial Analytics</h1><p className="text-[11px] font-medium text-gray-500">Intelligent Profit & Loss Tracking.</p></div>
+                                </div>
+                                <div className="flex w-full sm:w-auto items-center gap-2 p-1 bg-gray-100 rounded-xl shrink-0 border border-gray-200 overflow-x-auto">
+                                    <button onClick={() => setView('list')} className="whitespace-nowrap pro-button ghost px-4 py-1.5 text-xs rounded-lg">Inventory Data</button>
+                                    <button onClick={() => setView('clients')} className="whitespace-nowrap pro-button ghost px-4 py-1.5 text-xs rounded-lg">Clients</button>
+                                    <button className="whitespace-nowrap pro-button ghost active px-4 py-1.5 text-xs rounded-lg shadow-sm">Analytics</button>
+                                </div>
+                                <button type="button" onClick={handleLogout} className="pro-button secondary px-3 py-1.5 text-xs rounded-lg text-gray-600 hover:text-red-600 border-gray-200 hidden sm:inline-flex">Logout</button>
+                            </div>
+                            <div className="flex-1 overflow-auto p-4 sm:p-6 space-y-4">
+                                <div className="bg-white p-5 sm:p-6 rounded-3xl border border-gray-200 shadow-sm flex flex-col">
+                                    <h3 className="text-[11px] font-black uppercase tracking-widest text-gray-800 mb-2 border-b border-gray-100 pb-2">Financial Performance Trends (All Time)</h3>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 items-end pt-2">
+                                        <div className="w-full flex flex-col"><span className="text-[10px] font-bold text-gray-500 mb-4 uppercase text-center tracking-widest">Trend Analysis</span><LineChart data={analytics.trendsArray} /></div>
+                                        <div className="w-full flex flex-col"><span className="text-[10px] font-bold text-gray-500 mb-4 uppercase text-center tracking-widest">Volume Analysis</span><BarChart data={analytics.trendsArray} /></div>
+                                    </div>
+                                    <div className="flex justify-center gap-6 pt-3 border-t border-gray-100 mt-2">
+                                        <div className="flex items-center gap-2"><span className="w-3 h-1 rounded bg-black"></span><span className="text-[10px] font-bold uppercase tracking-wide text-gray-600">Revenue</span></div>
+                                        <div className="flex items-center gap-2"><span className="w-3 h-1 rounded bg-gray-400"></span><span className="text-[10px] font-bold uppercase tracking-wide text-gray-600">Costs</span></div>
+                                        <div className="flex items-center gap-2"><span className="w-3 h-1 rounded bg-green-500"></span><span className="text-[10px] font-bold uppercase tracking-wide text-gray-600">Net Profit</span></div>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-6 sm:p-8 rounded-3xl border border-gray-200 shadow-sm flex flex-col">
+                                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-6 border-b border-gray-100">
+                                        <div><h3 className="text-sm font-black uppercase tracking-widest text-gray-800 mb-1">Itemized Profit & Loss Log ({filterDetails.subtitle})</h3><p className="text-xs text-gray-500">Filter data securely and instantly save reports directly to a fully-formatted PDF.</p></div>
+                                        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                                            <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 w-full sm:w-auto">
+                                                <div className="text-gray-400 pl-2"><Icons.Filter /></div>
+                                                <select className="bg-transparent text-sm font-bold text-gray-700 outline-none pr-2 cursor-pointer" value={logFilter.type} onChange={e => setLogFilter({...logFilter, type: e.target.value})}>
+                                                    <option value="all">All Time</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Annually</option>
+                                                </select>
+                                                <div className="w-[1px] h-4 bg-gray-300 mx-1"></div>
+                                                {logFilter.type === 'daily' && <input type="date" className="bg-transparent text-sm font-semibold outline-none px-2 text-gray-700 cursor-pointer" value={logFilter.date} onChange={e => setLogFilter({...logFilter, date: e.target.value})} />}
+                                                {logFilter.type === 'weekly' && <input type="week" className="bg-transparent text-sm font-semibold outline-none px-2 text-gray-700 cursor-pointer" value={logFilter.week} onChange={e => setLogFilter({...logFilter, week: e.target.value})} />}
+                                                {logFilter.type === 'monthly' && <input type="month" className="bg-transparent text-sm font-semibold outline-none px-2 text-gray-700 cursor-pointer" value={logFilter.month} onChange={e => setLogFilter({...logFilter, month: e.target.value})} />}
+                                                {logFilter.type === 'yearly' && <input type="number" min="2000" max="2100" className="bg-transparent text-sm font-semibold outline-none px-2 text-gray-700 w-20 cursor-pointer" value={logFilter.year} onChange={e => setLogFilter({...logFilter, year: e.target.value})} />}
+                                            </div>
+                                            <button onClick={() => window.print()} className="pro-button black-btn px-4 py-2 text-xs shadow-md w-full sm:w-auto shrink-0 whitespace-nowrap"><Icons.Print /> Save Portrait PDF</button>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+                                        <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 flex flex-col justify-center"><h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1">Total Income</h3><div className="text-lg font-black text-gray-900">LKR {filteredTotals.tRev.toLocaleString(undefined, {maximumFractionDigits:0})}</div></div>
+                                        <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 flex flex-col justify-center"><h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1">Spend (COGS)</h3><div className="text-lg font-black text-gray-600">LKR {filteredTotals.tCost.toLocaleString(undefined, {maximumFractionDigits:0})}</div></div>
+                                        <div className="bg-blue-50 p-5 rounded-2xl border border-blue-100 flex flex-col justify-center"><h3 className="text-[10px] font-black uppercase tracking-widest text-blue-600 mb-1">Warranty Rev</h3><div className="text-lg font-black text-blue-800">LKR {filteredTotals.tExt.toLocaleString(undefined, {maximumFractionDigits:0})}</div></div>
+                                        <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 flex flex-col justify-center"><h3 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1">Items Sold</h3><div className="text-lg font-black text-gray-800">{filteredTotals.tQty} Units</div></div>
+                                        <div className={`p-5 rounded-2xl border flex flex-col justify-center ${filteredTotals.tProf < 0 ? 'bg-red-50 border-red-100' : 'bg-gray-900 border-black'}`}><h3 className={`text-[10px] font-black uppercase tracking-widest mb-1 ${filteredTotals.tProf < 0 ? 'text-red-600' : 'text-gray-400'}`}>Net Profit</h3><div className={`text-xl font-black ${filteredTotals.tProf > 0 ? 'text-green-500' : (filteredTotals.tProf < 0 ? 'text-red-600' : 'text-white')}`}>LKR {filteredTotals.tProf.toLocaleString(undefined, {maximumFractionDigits:0})}</div></div>
+                                    </div>
+                                    <div className="overflow-x-auto border border-gray-200 rounded-2xl">
+                                        <table className="w-full text-left whitespace-nowrap">
+                                            <thead className="bg-gray-50 text-[10px] uppercase tracking-widest text-gray-500 font-bold sticky top-0">
+                                                <tr>
+                                                    <th className="px-5 py-4 border-b border-gray-200">Date & Inv.</th>
+                                                    <th className="px-5 py-4 border-b border-gray-200">Product & IMEI</th>
+                                                    <th className="px-5 py-4 border-b border-gray-200 text-center">Qty</th>
+                                                    <th className="px-5 py-4 border-b border-gray-200 text-right">Avg Cost</th>
+                                                    <th className="px-5 py-4 border-b border-gray-200 text-right">Warranty</th>
+                                                    <th className="px-5 py-4 border-b border-gray-200 text-right">Selling Price</th>
+                                                    <th className="px-5 py-4 border-b border-gray-200 text-right">Net Profit</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100 text-xs font-medium bg-white">
+                                                {filteredItemizedLogs.length === 0 ? (
+                                                    <tr><td colSpan="7" className="py-10 text-center text-gray-500 font-medium italic">No sales data found for selected filter constraints.</td></tr>
+                                                ) : (
+                                                    filteredItemizedLogs.map((log, i) => {
+                                                        const isCredit = log.isCredit;
+                                                        const isReturn = log.tType === 'Return';
+                                                        const isIssue = log.tType === 'Issue';
+                                                        
+                                                        let rowClass = 'hover:bg-gray-50';
+                                                        if (isCredit) rowClass = 'bg-pink-50 hover:bg-pink-100';
+                                                        else if (isReturn) rowClass = 'bg-orange-50 hover:bg-orange-100';
+
+                                                        return (
+                                                            <tr key={i} className={`transition-colors ${rowClass}`}>
+                                                                <td className="px-5 py-4">
+                                                                    <div className={`font-bold ${isCredit ? 'text-pink-700' : isReturn ? 'text-orange-700' : 'text-gray-900'}`}>{log.dateStr.split(',')[0]}</div>
+                                                                    <div className={`text-[10px] font-mono mt-0.5 ${isCredit ? 'text-pink-600' : isReturn ? 'text-orange-600' : 'text-gray-500'}`}>{log.invoiceId}</div>
+                                                                    {log.clientName && (
+                                                                        <div className="mt-1.5">
+                                                                            <div className={`text-[9px] font-black uppercase tracking-wider ${log.isPartnerSale ? 'text-green-600' : (isIssue ? 'text-blue-600' : 'text-pink-600')}`}>
+                                                                                {log.clientName}
+                                                                            </div>
+                                                                            <div className={`text-[8.5px] font-bold uppercase tracking-widest mt-0.5 ${log.isPartnerSale ? 'text-green-600' : (isIssue ? 'text-blue-600' : 'text-pink-600')}`}>
+                                                                                {log.isPartnerSale ? '[SOLD]' : (isIssue ? '[ISSUED]' : '[CREDIT]')}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </td>
+                                                                <td className="px-5 py-4">
+                                                                    <div className={`font-bold text-xs ${isCredit ? 'text-pink-700' : isReturn ? 'text-orange-700' : 'text-gray-800'}`}>
+                                                                        {log.name}
+                                                                    </div>
+                                                                    <div className={`text-[10px] font-mono mt-0.5 ${isCredit ? 'text-pink-600' : isReturn ? 'text-orange-600' : 'text-gray-500'}`}>IMEI: {log.imei}</div>
+                                                                </td>
+                                                                <td className={`px-5 py-4 text-center font-bold ${isCredit ? 'text-pink-700' : isReturn ? 'text-orange-700' : 'text-gray-900'}`}>{log.qty}</td>
+                                                                <td className={`px-5 py-4 text-right ${isCredit ? 'text-pink-600' : isReturn ? 'text-orange-600' : 'text-gray-600'}`}>{log.cost === 0 ? '0' : log.cost.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                                                <td className={`px-5 py-4 text-right font-bold ${isCredit ? 'text-pink-700' : isReturn ? 'text-orange-700' : 'text-blue-600'}`}>{log.extWarrantyRev > 0 ? `+${log.extWarrantyRev.toLocaleString(undefined, {maximumFractionDigits:0})}` : (isCredit ? '0' : '-')}</td>
+                                                                <td className={`px-5 py-4 text-right font-bold ${isCredit ? 'text-pink-700' : isReturn ? 'text-orange-700' : 'text-gray-900'}`}>{(log.netRev * log.qty).toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                                                <td className={`px-5 py-4 text-right font-black ${isCredit ? 'text-pink-700' : isReturn ? 'text-orange-700' : (log.itemProfit > 0 ? 'text-green-500' : (log.itemProfit < 0 ? 'text-red-500' : 'text-gray-900'))}`}>
+                                                                    {log.itemProfit > 0 && !isCredit && !isReturn ? '+' : ''}{(log.itemProfit * log.qty).toLocaleString(undefined, {maximumFractionDigits:0})}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                )}
+                                            </tbody>
+                                            {filteredItemizedLogs.length > 0 && (
+                                                <tfoot className="bg-gray-50 font-black text-gray-900 border-t-2 border-gray-200 text-sm">
+                                                    <tr>
+                                                        <td colSpan="2" className="px-5 py-4 text-right text-xs uppercase tracking-widest text-gray-500">Totals:</td>
+                                                        <td className="px-5 py-4 text-center text-gray-900">{filteredTotals.tQty}</td>
+                                                        <td className="px-5 py-4 text-right text-gray-600">{filteredTotals.tCost.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                                        <td className="px-5 py-4 text-right text-blue-700">{filteredTotals.tExt > 0 ? `+${filteredTotals.tExt.toLocaleString(undefined, {maximumFractionDigits:0})}` : '-'}</td>
+                                                        <td className="px-5 py-4 text-right text-gray-900">{filteredTotals.tRev.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                                        <td className={`px-5 py-4 text-right ${filteredTotals.tProf > 0 ? 'text-green-500' : (filteredTotals.tProf < 0 ? 'text-red-600' : 'text-gray-900')}`}>{filteredTotals.tProf > 0 ? '+' : ''}{filteredTotals.tProf.toLocaleString(undefined, {maximumFractionDigits:0})}</td>
+                                                    </tr>
+                                                </tfoot>
+                                            )}
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (view === 'clients') { return (<div className="h-screen bg-[#f3f4f6] flex flex-col relative overflow-hidden print-hide"><ClientsView clients={clients} setView={setView} onLogout={handleLogout} /></div>); }
+
+            if (view === 'stockReport') {
+                return (
+                    <div className="h-screen bg-[#f3f4f6] flex flex-col relative overflow-hidden print-hide">
+                        <div className="p-4 sm:p-5 bg-white/90 border-b border-gray-200 shadow-sm">
+                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                                <div><h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">Stock Report</h1><p className="text-[11px] font-medium text-gray-500">Assets, stock value, sold units, and selling income.</p></div>
+                                <div className="flex flex-wrap gap-2 p-1 bg-gray-100 rounded-xl shrink-0 border border-gray-200">
+                                    <button onClick={() => setView('list')} className="whitespace-nowrap pro-button ghost px-4 py-1.5 text-xs rounded-lg">Inventory Data</button>
+                                    <button onClick={() => setView('clients')} className="whitespace-nowrap pro-button ghost px-4 py-1.5 text-xs rounded-lg">Clients</button>
+                                    <button onClick={() => setView('analytics')} className="whitespace-nowrap pro-button ghost px-4 py-1.5 text-xs rounded-lg">Analytics</button>
+                                    <button className="whitespace-nowrap pro-button ghost active px-4 py-1.5 text-xs rounded-lg shadow-sm">Stock Report</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-auto p-4 sm:p-6">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
+                                <div className="bg-white border border-gray-200 rounded-3xl p-5 shadow-sm"><p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Phone Stock</p><h2 className="text-2xl font-black text-blue-600 mt-2">{Number(stockReport.phoneUnits || 0).toLocaleString()} units</h2><p className="text-xs text-gray-500 mt-1">{Number(stockReport.phoneProducts || 0).toLocaleString()} phone product groups</p></div>
+                                <div className="bg-white border border-gray-200 rounded-3xl p-5 shadow-sm"><p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Accessory Stock</p><h2 className="text-2xl font-black text-violet-600 mt-2">{Number(stockReport.accessoryUnits || 0).toLocaleString()} units</h2><p className="text-xs text-gray-500 mt-1">{Number(stockReport.accessoryProducts || 0).toLocaleString()} accessory product groups</p></div>
+                                <div className="bg-white border border-gray-200 rounded-3xl p-5 shadow-sm"><p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Total Assets Amount</p><h2 className="text-2xl font-black text-gray-900 mt-2">LKR {stockReport.totalAssetsAmount.toLocaleString(undefined,{maximumFractionDigits:0})}</h2><p className="text-xs text-gray-500 mt-1">Available stock cost value</p></div>
+                                <div className="bg-white border border-gray-200 rounded-3xl p-5 shadow-sm"><p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Selling Income Amount</p><h2 className="text-2xl font-black text-blue-600 mt-2">LKR {stockReport.sellingIncomeAmount.toLocaleString(undefined,{maximumFractionDigits:0})}</h2><p className="text-xs text-gray-500 mt-1">Invoice sales income</p></div>
+                                <div className="bg-white border border-gray-200 rounded-3xl p-5 shadow-sm"><p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Available Units</p><h2 className="text-2xl font-black text-green-600 mt-2">{stockReport.availableUnits.toLocaleString()}</h2><p className="text-xs text-gray-500 mt-1">Visible in POS search</p></div>
+                                <div className="bg-white border border-gray-200 rounded-3xl p-5 shadow-sm"><p className="text-[10px] uppercase tracking-widest text-gray-500 font-black">Sold / Partner</p><h2 className="text-2xl font-black text-gray-900 mt-2">{stockReport.soldUnits.toLocaleString()} / {stockReport.partnerUnits.toLocaleString()}</h2><p className="text-xs text-gray-500 mt-1">Not shown in POS search</p></div>
+                            </div>
+                            <div className="bg-white border border-gray-200 rounded-3xl p-5 shadow-sm">
+                                <h3 className="text-sm font-black text-gray-900 mb-4">Financial Summary</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                    <div className="bg-gray-50 rounded-2xl p-4"><span className="text-gray-500 font-bold text-xs">Stock Selling Value</span><p className="font-black text-gray-900 mt-1">LKR {stockReport.stockSellingValue.toLocaleString(undefined,{maximumFractionDigits:0})}</p></div>
+                                    <div className="bg-gray-50 rounded-2xl p-4"><span className="text-gray-500 font-bold text-xs">Sold Cost Amount</span><p className="font-black text-gray-900 mt-1">LKR {stockReport.soldCostAmount.toLocaleString(undefined,{maximumFractionDigits:0})}</p></div>
+                                    <div className="bg-gray-50 rounded-2xl p-4"><span className="text-gray-500 font-bold text-xs">Gross Profit</span><p className="font-black text-green-600 mt-1">LKR {stockReport.grossProfit.toLocaleString(undefined,{maximumFractionDigits:0})}</p></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (view === 'list') {
+                return (
+                    <div className="h-screen bg-[#f3f4f6] flex flex-col relative overflow-hidden print-hide">
+                        {toastMsg && (
+                            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[110] toast-animate"><div className="bg-slate-900 text-white px-5 py-2.5 rounded-full shadow-lg font-medium text-xs flex items-center gap-2">{toastMsg}</div></div>
+                        )}
+                        <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 shrink-0 z-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center shrink-0 shadow-md"><Icons.Inventory /></div>
+                                <div><h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">Inventory Portal</h1><p className="text-[11px] font-medium text-gray-500">Manage stock, suppliers, and pricing.</p></div>
+                            </div>
+                            <div className="flex flex-col sm:flex-row w-full sm:w-auto items-stretch sm:items-center gap-3">
+                                <div className="flex p-1 bg-gray-100 rounded-xl shrink-0 border border-gray-200 self-center overflow-x-auto">
+                                    <button className="whitespace-nowrap flex-1 sm:flex-none pro-button ghost active px-4 py-1.5 text-xs rounded-lg shadow-sm">Inventory Data</button>
+                                    <button onClick={() => setView('clients')} className="whitespace-nowrap flex-1 sm:flex-none pro-button ghost px-4 py-1.5 text-xs rounded-lg">Clients</button>
+                                    <button onClick={() => setView('analytics')} className="whitespace-nowrap flex-1 sm:flex-none pro-button ghost px-4 py-1.5 text-xs flex items-center gap-1.5 rounded-lg"><Icons.Chart /> Analytics</button>
+                                    <button onClick={() => setView('stockReport')} className="whitespace-nowrap flex-1 sm:flex-none pro-button ghost px-4 py-1.5 text-xs flex items-center gap-1.5 rounded-lg"><Icons.Inventory /> Stock Report</button>
+                                </div>
+                                <div className="relative w-full sm:w-64 shadow-sm rounded-xl">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Icons.Search /></span>
+                                    <input type="text" placeholder="Search product or IMEI..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-[#f8fafc] border border-gray-200 pl-9 pr-10 py-2 rounded-xl focus:bg-white focus:border-black text-sm font-medium transition-all outline-none focus:ring-2 focus:ring-black/10" />
+                                    <button type="button" onClick={startPeerServer} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-black p-1" title="Scan Barcode"><Icons.Scan /></button>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button type="button" onClick={() => fetchData(false)} disabled={loading || actionLoading} className="pro-button secondary px-3 py-2 text-gray-600 rounded-xl" title="Refresh Local Data">
+                                        <span className={loading ? "animate-spin text-black" : ""}><Icons.Loader className="w-4 h-4" /></span>
+                                    </button>
+                                    <button type="button" onClick={handleAddNewClick} className="pro-button black-btn px-4 py-2 text-sm shadow-sm shrink-0 rounded-xl"><Icons.Plus /> <span className="hidden sm:inline">New Item</span></button>
+                                    <a href="settings.html" className="pro-button secondary px-3 py-2 text-sm rounded-xl text-gray-700 border-gray-200">Settings &amp; Backup</a>
+                                    <button type="button" onClick={handleLogout} className="pro-button secondary px-3 py-2 text-sm rounded-xl text-gray-600 hover:text-red-600 border-gray-200 hidden md:inline-flex">Logout</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-auto p-4 sm:p-6">
+                            <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3 mb-4">
+                                <button type="button" onClick={() => setView('stockReport')} className="text-left bg-white border border-blue-100 rounded-2xl p-4 shadow-sm hover:border-blue-300 transition-colors"><p className="text-[9px] uppercase tracking-widest font-black text-gray-400">Phones</p><p className="text-xl font-black text-blue-600 mt-1">{Number(stockReport.phoneUnits || 0).toLocaleString()}</p><p className="text-[10px] text-gray-500 mt-1">{Number(stockReport.phoneProducts || 0).toLocaleString()} product groups</p></button>
+                                <button type="button" onClick={() => setView('stockReport')} className="text-left bg-white border border-violet-100 rounded-2xl p-4 shadow-sm hover:border-violet-300 transition-colors"><p className="text-[9px] uppercase tracking-widest font-black text-gray-400">Accessories</p><p className="text-xl font-black text-violet-600 mt-1">{Number(stockReport.accessoryUnits || 0).toLocaleString()}</p><p className="text-[10px] text-gray-500 mt-1">{Number(stockReport.accessoryProducts || 0).toLocaleString()} product groups</p></button>
+                                <button type="button" onClick={() => setView('stockReport')} className="text-left bg-white border border-emerald-100 rounded-2xl p-4 shadow-sm hover:border-emerald-300 transition-colors"><p className="text-[9px] uppercase tracking-widest font-black text-gray-400">All Stock Units</p><p className="text-xl font-black text-emerald-600 mt-1">{Number(stockReport.availableUnits || 0).toLocaleString()}</p><p className="text-[10px] text-gray-500 mt-1">Available for sale</p></button>
+                                <button type="button" onClick={() => setView('stockReport')} className="text-left bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:border-gray-400 transition-colors"><p className="text-[9px] uppercase tracking-widest font-black text-gray-400">Stock Cost</p><p className="text-base font-black text-gray-900 mt-1">LKR {Number(stockReport.totalAssetsAmount || 0).toLocaleString(undefined,{maximumFractionDigits:0})}</p><p className="text-[10px] text-gray-500 mt-1">Capital in stock</p></button>
+                                <button type="button" onClick={() => setView('stockReport')} className="text-left bg-white border border-cyan-100 rounded-2xl p-4 shadow-sm hover:border-cyan-300 transition-colors"><p className="text-[9px] uppercase tracking-widest font-black text-gray-400">Selling Value</p><p className="text-base font-black text-cyan-700 mt-1">LKR {Number(stockReport.stockSellingValue || 0).toLocaleString(undefined,{maximumFractionDigits:0})}</p><p className="text-[10px] text-gray-500 mt-1">Potential stock revenue</p></button>
+                                <button type="button" onClick={() => setView('stockReport')} className="text-left bg-white border border-indigo-100 rounded-2xl p-4 shadow-sm hover:border-indigo-300 transition-colors"><p className="text-[9px] uppercase tracking-widest font-black text-gray-400">Net Sales Income</p><p className="text-base font-black text-indigo-600 mt-1">LKR {Number(stockReport.sellingIncomeAmount || 0).toLocaleString(undefined,{maximumFractionDigits:0})}</p><p className="text-[10px] text-gray-500 mt-1">Sales less returns</p></button>
+                                <button type="button" onClick={() => setView('stockReport')} className="text-left bg-white border border-green-100 rounded-2xl p-4 shadow-sm hover:border-green-300 transition-colors"><p className="text-[9px] uppercase tracking-widest font-black text-gray-400">Gross Profit</p><p className="text-base font-black text-green-600 mt-1">LKR {Number(stockReport.grossProfit || 0).toLocaleString(undefined,{maximumFractionDigits:0})}</p><p className="text-[10px] text-gray-500 mt-1">Income after item cost</p></button>
+                                <button type="button" onClick={() => setView('stockReport')} className="text-left bg-white border border-amber-100 rounded-2xl p-4 shadow-sm hover:border-amber-300 transition-colors"><p className="text-[9px] uppercase tracking-widest font-black text-gray-400">Partner Assets</p><p className="text-base font-black text-amber-600 mt-1">{Number(stockReport.partnerUnits || 0).toLocaleString()} units</p><p className="text-[10px] text-gray-500 mt-1">Cost LKR {Number(stockReport.partnerCostValue || 0).toLocaleString(undefined,{maximumFractionDigits:0})}</p></button>
+                            </div>
+                            <div className="bg-white border border-gray-200 rounded-3xl shadow-sm overflow-hidden flex flex-col min-h-[420px]">
+                                <div className="overflow-x-auto flex-1">
+                                    <table className="w-full text-left border-collapse whitespace-nowrap">
+                                        <thead className="bg-[#f8fafc] text-[10px] uppercase tracking-widest text-slate-500 font-bold sticky top-0 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
+                                            <tr>
+                                                <th className="px-5 py-3 border-b border-gray-200">Product / SKU</th>
+                                                <th className="px-5 py-3 border-b border-gray-200">Suppliers & Avg Cost</th>
+                                                <th className="px-5 py-3 border-b border-gray-200 text-right">Selling Price</th>
+                                                <th className="px-5 py-3 border-b border-gray-200 text-center">Stock</th>
+                                                <th className="px-5 py-3 border-b border-gray-200">Status</th>
+                                                <th className="px-5 py-3 border-b border-gray-200 text-right">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100 text-sm">
+                                            {loading && inventory.length === 0 ? (
+                                                <tr><td colSpan="6" className="py-20 text-center"><div className="flex flex-col items-center justify-center text-gray-400"><Icons.Loader className="w-6 h-6 text-black animate-spin mb-3" /><p className="font-medium text-xs">Loading Local Database...</p></div></td></tr>
+                                            ) : filteredInventory.length === 0 ? (
+                                                <tr><td colSpan="6" className="py-20 text-center text-gray-500 font-medium text-sm">No inventory records found.</td></tr>
+                                            ) : (
+                                                filteredInventory.map((item, idx) => {
+                                                    const isSold = String(item.Status).toLowerCase().includes('sold');
+                                                    
+                                                    // Calculate Average Cost of all units
+                                                    let totalCost = 0, validUnits = 0;
+                                                    if (item.Units && item.Units.length > 0) {
+                                                        item.Units.forEach(u => { if (parseFloat(u.cost) > 0) { totalCost += parseFloat(u.cost); validUnits++; } });
+                                                    }
+                                                    const avgCost = validUnits > 0 ? totalCost / validUnits : 0;
+
+                                                    return (
+                                                        <tr key={idx} className={`hover:bg-slate-50 transition-colors group align-top ${isSold ? 'opacity-70 bg-gray-50' : ''}`}>
+                                                            <td className="px-5 py-3">
+                                                                <div className="font-bold text-gray-900 text-sm">{item.Brand} {item.Model}</div>
+                                                                <div className="text-[11px] font-mono text-gray-500 mt-1 flex items-center gap-2">
+                                                                    <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[9px] font-sans font-bold uppercase">{item.Type}</span>
+                                                                    {item.IMEI}
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-5 py-3">
+                                                                <div className="font-bold text-gray-700 text-xs mb-1">Avg: LKR {avgCost > 0 ? avgCost.toLocaleString(undefined, {maximumFractionDigits:0}) : '-'}</div>
+                                                                <button type="button" onClick={() => setDetailsModalItem(item)} className="pro-button secondary py-1 px-2 text-[10px] text-gray-600 rounded">
+                                                                    <Icons.Eye /> View Detailed Units
+                                                                </button>
+                                                            </td>
+                                                            <td className="px-5 py-3 text-right">
+                                                                <div className="font-bold text-black text-sm">{item.Price ? parseFloat(item.Price).toLocaleString() : '-'}</div>
+                                                                {item.OfferPrice && <div className="text-[10px] text-gray-600 font-bold mt-0.5">Offer: {parseFloat(item.OfferPrice).toLocaleString()}</div>}
+                                                            </td>
+                                                            <td className="px-5 py-3 text-center align-middle">
+                                                                <span className={`font-black text-sm ${parseInt(item.Quantity) > 0 ? 'text-gray-900' : 'text-gray-300'}`}>{item.Quantity}</span>
+                                                            </td>
+                                                            <td className="px-5 py-3 align-middle">
+                                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${isSold ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                                                                    {item.Status || 'Available'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-5 py-3 text-right align-middle">
+                                                                <button onClick={() => handleEditClick(item)} className="p-1.5 text-gray-400 hover:text-black hover:bg-gray-100 rounded-lg transition-colors inline-flex items-center gap-1.5">
+                                                                    <Icons.Edit /> <span className="text-[11px] font-bold hidden sm:inline">Edit</span>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    )
+                                                })
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        {detailsModalItem && (
+                            <div className="fixed inset-0 glass-overlay z-[9999] flex items-center justify-center p-4">
+                                <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden border border-gray-200">
+                                    <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                                        <div>
+                                            <h2 className="font-bold text-lg text-gray-900 leading-tight">{detailsModalItem.Brand} {detailsModalItem.Model}</h2>
+                                            <p className="text-[11px] text-gray-500 font-mono mt-0.5">SKU/Code: {detailsModalItem.IMEI}</p>
+                                        </div>
+                                        <button onClick={() => setDetailsModalItem(null)} className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-300">✕</button>
+                                    </div>
+                                    <div className="p-5 overflow-auto flex-1 custom-scrollbar">
+                                        <table className="w-full text-left text-sm border-collapse">
+                                            <thead className="bg-gray-100 text-[10px] uppercase tracking-widest text-gray-500 font-bold">
+                                                <tr>
+                                                    <th className="px-4 py-3 rounded-l-lg">Unit IMEI / ID</th>
+                                                    <th className="px-4 py-3">Supplier</th>
+                                                    <th className="px-4 py-3 text-right">Cost (LKR)</th>
+                                                    <th className="px-4 py-3 text-center">Date Added</th>
+                                                    <th className="px-4 py-3 text-right rounded-r-lg">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {detailsModalItem.Units?.map((u, i) => {
+                                                    const isPartner = String(u.status).startsWith('Partner');
+                                                    let badgeClass = 'bg-green-100 text-green-700';
+                                                    if (u.status === 'Sold') badgeClass = 'bg-red-100 text-red-700';
+                                                    else if (isPartner) badgeClass = 'bg-orange-100 text-orange-800';
+
+                                                    return (
+                                                        <tr key={i} className="hover:bg-gray-50 transition-colors">
+                                                            <td className="px-4 py-3 font-mono font-bold text-gray-800 text-xs">{u.imei || '-'}</td>
+                                                            <td className="px-4 py-3 text-gray-600 text-xs font-medium">{u.supplier || '-'}</td>
+                                                            <td className="px-4 py-3 text-right font-bold text-gray-900 text-xs">{u.cost ? parseFloat(u.cost).toLocaleString() : '-'}</td>
+                                                            <td className="px-4 py-3 text-center text-gray-500 text-[11px]">{new Date(u.dateAdded).toLocaleDateString()}</td>
+                                                            <td className="px-4 py-3 text-right">
+                                                                <span className={`inline-block px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider ${badgeClass}`}>
+                                                                    {isPartner ? String(u.status).replace('Partner:', 'P:') : u.status}
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                                {(!detailsModalItem.Units || detailsModalItem.Units.length === 0) && (
+                                                    <tr><td colSpan="5" className="p-8 text-center text-gray-500 italic">No detailed unit data available for this item.</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {showQR && (
+                            <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-[9999]">
+                                <div className="bg-white w-full max-w-sm rounded-[24px] shadow-2xl flex flex-col overflow-hidden border border-gray-200 text-center">
+                                    <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                                        <h3 className="font-bold text-sm text-gray-900">Mobile Scanner</h3>
+                                        <button type="button" onClick={() => setShowQR(false)} className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-300">✕</button>
+                                    </div>
+                                    <div className="p-8 flex flex-col items-center">
+                                        <p className="text-xs text-gray-500 mb-6 font-medium">Scan this QR code with your mobile phone to use it as a wireless barcode scanner.</p>
+                                        {qrUrl ? (
+                                            <img src={`/api/v1/qr?size=180&data=${encodeURIComponent(qrUrl)}`} alt="QR Code" className="w-40 h-40 mb-6 border border-gray-200 rounded-2xl p-2 bg-white shadow-sm" />
+                                        ) : (
+                                            <div className="w-40 h-40 flex items-center justify-center mb-6"><Icons.Loader className="text-black w-8 h-8" /></div>
+                                        )}
+                                        <div className="text-[10px] font-bold text-gray-800 bg-gray-100 px-4 py-1.5 rounded-full animate-pulse border border-gray-200">Waiting for connection...</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-[#f3f4f6] flex justify-center p-4 sm:p-6 md:p-8 relative print-hide">
+                    {toastMsg && (
+                        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[110] toast-animate">
+                            <div className="bg-slate-900 text-white px-5 py-2.5 rounded-full shadow-lg font-medium text-xs flex items-center gap-2">
+                                {toastMsg}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="w-full max-w-[1200px] bg-white rounded-[24px] shadow-xl overflow-hidden border border-gray-200 flex flex-col">
+                        
+                        <div className="bg-white border-b border-gray-100 px-6 py-5 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center shrink-0 sticky top-0 z-20">
+                            <div className="flex items-center gap-4">
+                                <button type="button" onClick={handleCancel} className="w-10 h-10 bg-gray-100 text-gray-600 rounded-xl flex items-center justify-center hover:bg-gray-200 transition-colors shrink-0">
+                                    <Icons.ArrowLeft />
+                                </button>
+                                <div>
+                                    <h1 className="text-xl font-bold text-gray-900 tracking-tight leading-tight">{isEditing ? 'Edit Inventory Group' : 'Add Product Group'}</h1>
+                                    <p className="text-gray-500 font-medium text-[11px] mt-0.5">{isEditing ? `Updating SKU: ${form.IMEI}` : 'Add a product and list all its individual units.'}</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2 w-full sm:w-auto">
+                                <button type="button" onClick={handleCancel} className="pro-button secondary px-5 py-2.5 text-xs flex-1 sm:flex-none rounded-xl">Cancel</button>
+                                <button type="button" onClick={handleSubmit} disabled={actionLoading} className="pro-button black-btn px-6 py-2.5 text-xs shadow-sm flex-1 sm:flex-none rounded-xl">
+                                    {actionLoading ? <Icons.Loader className="text-white w-4 h-4" /> : <Icons.Check />} 
+                                    {actionLoading ? 'Saving...' : 'Save Record'}
+                                </button>
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="p-6 sm:p-8 flex-1 overflow-y-auto">
+                            
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-5 pb-6 border-b border-gray-100">
+                                <div className="lg:col-span-1"><label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">Item Type</label><AutocompleteInput name="Type" value={form.Type} onChange={handleChange} options={DATASETS.Types} placeholder="e.g. Phone" className="px-4 py-2 text-sm" /></div>
+                                <div className="lg:col-span-1"><label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">Category</label><AutocompleteInput name="Category" value={form.Category} onChange={handleChange} options={DATASETS.Categories} placeholder="e.g. Smartphones" className="px-4 py-2 text-sm" /></div>
+                                <div className="lg:col-span-1"><label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">Brand *</label><AutocompleteInput name="Brand" value={form.Brand} onChange={handleChange} required options={DATASETS.Brands} placeholder="e.g. Apple" className="px-4 py-2 text-sm font-semibold" /></div>
+                                <div className="lg:col-span-1"><label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">Model *</label><AutocompleteInput name="Model" value={form.Model} onChange={handleChange} required options={DATASETS.Models} placeholder="e.g. iPhone 15" className="px-4 py-2 text-sm font-semibold" /></div>
+                                
+                                <div className="lg:col-span-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">Product Group Code / SKU *</label>
+                                    <div className="flex gap-2">
+                                        <input name="IMEI" value={form.IMEI} onChange={handleChange} required disabled={isEditing} placeholder="Unique SKU for this group" className={`pro-input px-4 py-2 font-mono font-bold text-sm w-full ${isEditing ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-white border-gray-300'}`} />
+                                        {!isEditing && (
+                                            <button type="button" onClick={startPeerServer} className="w-[42px] h-[42px] bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl flex items-center justify-center shrink-0 border border-gray-300" title="Use Mobile Scanner">
+                                                <Icons.Scan />
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-[9px] text-gray-400 mt-1">This represents the entire group. Actual IMEIs are entered below per unit.</p>
+                                </div>
+                                <div className="lg:col-span-1"><label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">Color</label><AutocompleteInput name="Color" value={form.Color} onChange={handleChange} options={DATASETS.Colors} placeholder="e.g. Black" className="px-4 py-2 text-sm" /></div>
+                            </div>
+
+                            <div className="flex flex-col lg:flex-row gap-8 pt-6">
+                                <div className="flex-[2] flex flex-col">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <div>
+                                            <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest">Stock Acquisition</h2>
+                                            <p className="text-[11px] text-gray-500 font-medium">Add supplier quantity, then enter each individual unit's IMEI below.</p>
+                                        </div>
+                                        <button type="button" onClick={addSupplierRow} className="text-[10px] font-bold text-black bg-gray-100 border border-gray-200 hover:bg-gray-200 px-4 py-2 rounded-lg transition-colors shadow-sm">
+                                            + Add Supplier Batch
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        {form.Suppliers.map((sup, index) => (
+                                            <div key={index} className="bg-gray-50 p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col gap-4 relative">
+                                                {form.Suppliers.length > 1 && (
+                                                    <button type="button" onClick={() => removeSupplierRow(index)} className="absolute -top-2 -right-2 bg-red-100 text-red-600 hover:bg-red-500 hover:text-white p-1.5 rounded-full transition-colors shadow-sm z-10" title="Remove Batch">
+                                                        <Icons.Trash />
+                                                    </button>
+                                                )}
+                                                
+                                                <div className="flex flex-col sm:flex-row gap-4 items-start w-full">
+                                                    <div className="flex-1 w-full">
+                                                        <label className="text-[9px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Supplier Name</label>
+                                                        <AutocompleteInput value={sup.name} onChange={(e) => handleSupplierChange(index, 'name', e.target.value)} options={dynamicSuppliers} placeholder="Supplier Name" className="px-3 py-2 text-sm border-transparent focus:border-gray-400" />
+                                                    </div>
+                                                    <div className="w-full sm:w-32 relative">
+                                                        <label className="text-[9px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Unit Cost (LKR)</label>
+                                                        <input type="number" value={sup.cost} onChange={(e) => handleSupplierChange(index, 'cost', e.target.value)} placeholder="0" className="pro-input px-3 py-2 text-sm border-red-100 bg-white text-red-700 font-bold w-full" />
+                                                    </div>
+                                                    <div className="w-full sm:w-24 relative">
+                                                        <label className="text-[9px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Total Qty</label>
+                                                        <input type="number" value={sup.qty} onChange={(e) => handleSupplierChange(index, 'qty', e.target.value)} placeholder="Qty" className="pro-input px-3 py-2 text-sm border-blue-200 bg-blue-50 font-black w-full text-center text-blue-700" />
+                                                    </div>
+                                                </div>
+
+                                                {sup.units && sup.units.length > 0 && (
+                                                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-2">
+                                                        <div className="flex justify-between items-center mb-3">
+                                                            <label className="text-[10px] font-bold text-black uppercase tracking-wider">Individual Unit Identifiers (IMEI / ID)</label>
+                                                            <button type="button" onClick={startPeerServer} className="text-[10px] font-bold text-gray-500 hover:text-black flex items-center gap-1"><Icons.Scan /> Auto-Scan Mode</button>
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            {sup.units.map((u, ui) => {
+                                                                const isPartner = String(u.status).startsWith('Partner');
+                                                                return (
+                                                                    <div key={ui} className="relative group flex flex-col gap-1">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-5 h-5 bg-gray-100 rounded-md text-[9px] font-bold text-gray-400 flex items-center justify-center shrink-0">#{ui+1}</div>
+                                                                            <input
+                                                                                placeholder={`Unit IMEI / ID...`}
+                                                                                value={u.imei}
+                                                                                onChange={e => handleUnitImeiChange(index, ui, e.target.value)}
+                                                                                className={`pro-input px-3 py-2 text-xs font-mono font-bold w-full ${u.status === 'Sold' ? 'bg-red-50 text-red-600 border-red-100 cursor-not-allowed' : (isPartner ? 'bg-orange-50 text-orange-700 border-orange-100 cursor-not-allowed' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-black focus:ring-2 focus:ring-black/10')}`}
+                                                                                disabled={u.status === 'Sold' || isPartner}
+                                                                            />
+                                                                        </div>
+                                                                        {u.status === 'Sold' && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] font-black uppercase bg-red-500 text-white px-1.5 py-0.5 rounded">Sold</span>}
+                                                                        {isPartner && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] font-black uppercase bg-orange-500 text-white px-1.5 py-0.5 rounded max-w-[80px] truncate" title={u.status}>{String(u.status).replace('Partner:', 'P:')}</span>}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <p className="text-[9px] text-gray-400 mt-3 font-medium flex items-center gap-1">
+                                                            <Icons.Scan className="w-3 h-3" /> Tip: Mobile Scanner will automatically fill the first empty box.
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col gap-6 self-start xl:sticky xl:top-6">
+                                    
+                                    <div className="bg-white p-5 rounded-2xl border border-gray-100 flex flex-col justify-center items-center shadow-sm">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Total System Stock</label>
+                                        <div className="text-5xl font-black text-gray-900 tracking-tighter">{form.Quantity}</div>
+                                        <div className="text-[9px] font-bold uppercase tracking-wider text-black mt-2 px-2 py-0.5 bg-gray-100 rounded-full">{form.Status}</div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">General Selling Price (LKR) *</label>
+                                            <input name="Price" type="number" required value={form.Price} onChange={handleChange} className="pro-input px-4 py-3 border-gray-300 bg-white font-black text-gray-900 text-xl shadow-inner w-full focus:border-black focus:ring-2 focus:ring-black/10" placeholder="0" />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">General Offer Price</label>
+                                            <input name="OfferPrice" type="number" value={form.OfferPrice} onChange={handleChange} className="pro-input px-4 py-2.5 border-green-200 bg-green-50/50 font-bold text-green-700 text-sm w-full" placeholder="Optional Discounted Price" />
+                                        </div>
+                                    </div>
+
+                                    <div className="border-t border-gray-200 pt-5 space-y-4">
+                                        <label className="text-[11px] font-black text-slate-800 uppercase tracking-widest block">Hardware Specs</label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-[9px] font-bold text-gray-500 uppercase tracking-wider block mb-1">RAM</label>
+                                                <AutocompleteInput name="RAM" value={specs.RAM} onChange={handleSpecChange} options={DATASETS.RAMs} placeholder="e.g. 8GB" className="px-3 py-2 text-xs" />
+                                            </div>
+                                            <div>
+                                                <label className="text-[9px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Storage</label>
+                                                <AutocompleteInput name="ROM" value={specs.ROM} onChange={handleSpecChange} options={DATASETS.ROMs} placeholder="e.g. 256GB" className="px-3 py-2 text-xs" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[9px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Other Details</label>
+                                            <input name="Other" value={specs.Other} onChange={handleSpecChange} placeholder="Any other hardware details..." className="pro-input px-3 py-2 text-xs w-full" />
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    {/* Scanner Modal */}
+                    {showQR && (
+                        <div className="fixed inset-0 glass-overlay flex items-center justify-center p-4 z-[9999]">
+                            <div className="bg-white w-full max-w-sm rounded-[24px] shadow-2xl flex flex-col overflow-hidden border border-gray-200 text-center">
+                                <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                                    <h3 className="font-bold text-sm text-gray-900">Mobile Scanner</h3>
+                                    <button type="button" onClick={() => setShowQR(false)} className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center hover:bg-gray-300">✕</button>
+                                </div>
+                                <div className="p-8 flex flex-col items-center">
+                                    <p className="text-xs text-gray-500 mb-6 font-medium">Scan this QR code with your mobile phone to use it as a wireless barcode scanner.</p>
+                                    {qrUrl ? (
+                                        <img src={`/api/v1/qr?size=180&data=${encodeURIComponent(qrUrl)}`} alt="QR Code" className="w-40 h-40 mb-6 border border-gray-200 rounded-2xl p-2 bg-white shadow-sm" />
+                                    ) : (
+                                        <div className="w-40 h-40 flex items-center justify-center mb-6"><Icons.Loader className="text-black w-8 h-8" /></div>
+                                    )}
+                                    <div className="text-[10px] font-bold text-gray-800 bg-gray-100 px-4 py-1.5 rounded-full animate-pulse border border-gray-200">Waiting for connection...</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const mountNode = document.getElementById('root');
+        if (!mountNode) throw new Error('Root element #root was not found.');
+        if (ReactDOM.createRoot) {
+            ReactDOM.createRoot(mountNode).render(<ErrorBoundary><App /></ErrorBoundary>);
+        } else {
+            ReactDOM.render(<ErrorBoundary><App /></ErrorBoundary>, mountNode);
+        }
+        document.body.classList.add('app-mounted');
+    
+} catch (err) {
+  if (window.__ICON_BOOT_ERROR__) window.__ICON_BOOT_ERROR__(err && (err.stack || err.message) || err);
+  else throw err;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICON MOBILE - Settings & Backup</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/local-api.js"></script>
+  <style>
+    :root { color-scheme: light; --blue:#1677ff; --ink:#172033; --muted:#667085; --line:#e4e7ec; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#f5f7fb; color:var(--ink); font-family:Inter,system-ui,sans-serif; }
+    .shell { max-width:1180px; margin:auto; padding:22px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:22px; }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .brand img { width:46px; height:46px; object-fit:contain; background:white; border-radius:14px; padding:4px; box-shadow:0 4px 15px #10182812; }
+    h1 { font-size:24px; margin:0; font-weight:850; letter-spacing:-.03em; }
+    h2 { font-size:17px; margin:0 0 4px; font-weight:800; }
+    p { margin:0; }
+    .muted { color:var(--muted); font-size:13px; line-height:1.55; }
+    .grid { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:16px; }
+    .card { grid-column:span 6; background:white; border:1px solid var(--line); border-radius:20px; padding:20px; box-shadow:0 8px 28px #10182809; }
+    .wide { grid-column:span 12; }
+    .third { grid-column:span 4; }
+    .card-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
+    .badge { font-size:11px; font-weight:800; padding:6px 10px; border-radius:999px; background:#ecfdf3; color:#067647; }
+    .badge.warn { background:#fff4e5; color:#b54708; }
+    .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    .stat { padding:13px; border-radius:14px; background:#f8fafc; border:1px solid #eef1f5; }
+    .stat strong { display:block; font-size:21px; }
+    .stat span { font-size:11px; color:var(--muted); text-transform:uppercase; font-weight:750; letter-spacing:.05em; }
+    .actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:15px; }
+    button,.button { border:0; border-radius:12px; padding:10px 14px; font:inherit; font-size:12px; font-weight:800; cursor:pointer; background:#eef2f7; color:#344054; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+    button.primary { background:var(--blue); color:white; }
+    button.danger { background:#fff0f0; color:#c4320a; }
+    button:disabled { opacity:.55; cursor:wait; }
+    input,select { width:100%; border:1px solid #d0d5dd; border-radius:12px; padding:11px 12px; font:inherit; background:white; }
+    label { display:block; font-size:12px; font-weight:750; color:#475467; margin-bottom:6px; }
+    .form-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .url-row { display:flex; align-items:center; gap:8px; padding:10px 12px; background:#f8fafc; border:1px solid #e4e7ec; border-radius:12px; margin-top:8px; }
+    .url-row code { flex:1; overflow-wrap:anywhere; font-size:12px; }
+    .device,.backup-row { display:flex; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid #f0f2f5; font-size:12px; }
+    .device:last-child,.backup-row:last-child { border-bottom:0; }
+    .reminder { display:none; padding:14px 16px; border-radius:15px; background:#fff5e8; border:1px solid #fedf89; color:#934b00; margin-bottom:16px; font-size:13px; font-weight:700; }
+    .reminder.show { display:block; }
+    .steps { counter-reset:step; display:grid; gap:10px; margin-top:14px; }
+    .step { display:flex; gap:11px; align-items:flex-start; font-size:13px; color:#475467; }
+    .step:before { counter-increment:step; content:counter(step); min-width:24px; height:24px; border-radius:8px; display:grid; place-items:center; background:#e8f1ff; color:#175cd3; font-weight:850; }
+    .login { min-height:100vh; display:grid; place-items:center; padding:20px; }
+    .login-card { width:min(390px,100%); background:white; padding:28px; border-radius:24px; border:1px solid var(--line); box-shadow:0 24px 70px #1018281c; text-align:center; }
+    .login-card img { width:85px; height:85px; object-fit:contain; }
+    .login-card input { margin:20px 0 10px; text-align:center; }
+    .login-card button { width:100%; padding:13px; }
+    .toast { position:fixed; right:18px; bottom:18px; max-width:380px; padding:13px 16px; color:white; background:#172033; border-radius:13px; box-shadow:0 12px 40px #10182838; opacity:0; pointer-events:none; transform:translateY(8px); transition:.2s; font-size:13px; z-index:20; }
+    .toast.show { opacity:1; transform:none; }
+    #app[hidden],#login[hidden] { display:none; }
+    @media(max-width:850px){ .card,.third{grid-column:span 12}.stats{grid-template-columns:1fr 1fr}.form-row{grid-template-columns:1fr}.shell{padding:14px}.topbar{align-items:flex-start}.topbar .actions{justify-content:flex-end;margin-top:0} }
+  </style>
+</head>
+<body>
+  <section id="login" class="login">
+    <form id="loginForm" class="login-card">
+      <img src="/logo.png" alt="ICON MOBILE">
+      <h1>Settings & Backup</h1>
+      <p class="muted">Administrator access is required.</p>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Admin password" required>
+      <button class="primary" type="submit">Unlock Settings</button>
+      <button class="settingsBack" type="button" style="margin-top:9px">← Back</button>
+      <p id="loginError" class="muted" style="color:#d92d20;margin-top:10px"></p>
+    </form>
+  </section>
+
+  <main id="app" class="shell" hidden>
+    <header class="topbar">
+      <div class="brand"><img src="/logo.png" alt=""><div><h1>Settings & Backup</h1><p class="muted">Local SQLite safety and LAN connections</p></div></div>
+      <div class="actions"><button class="settingsBack" type="button">← Back</button><a class="button" href="/">POS</a><button id="refresh">Refresh</button><button id="logout">Logout</button></div>
+    </header>
+    <div id="reminder" class="reminder"></div>
+
+    <section class="grid">
+      <article class="card wide">
+        <div class="card-head"><div><h2>Database health</h2><p class="muted">The authoritative database is stored on this host computer.</p></div><span id="healthBadge" class="badge">Checking</span></div>
+        <div class="stats">
+          <div class="stat"><strong id="productCount">0</strong><span>Products</span></div>
+          <div class="stat"><strong id="unitCount">0</strong><span>Units</span></div>
+          <div class="stat"><strong id="clientCount">0</strong><span>Clients</span></div>
+          <div class="stat"><strong id="transactionCount">0</strong><span>Transactions</span></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><div><h2>Backup & pen drive</h2><p class="muted">Creates a complete, consistent SQLite copy while the system stays online.</p></div><span id="backupBadge" class="badge warn">Due</span></div>
+        <p id="backupInfo" class="muted"></p>
+        <div class="actions">
+          <button id="downloadBackup" class="primary">Download backup</button>
+          <button id="penDriveBackup">Save to pen drive</button>
+          <button id="shareBackup">Share / WhatsApp</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><div><h2>Restore / import backup</h2><p class="muted">The uploaded file is integrity-checked and the current database is backed up first.</p></div></div>
+        <input id="restoreFile" type="file" accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3">
+        <div class="actions"><button id="restoreBackup" class="danger">Validate and restore</button></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><div><h2>CSV exports</h2><p class="muted">Excel-friendly copies for reports. SQLite backup remains the complete restore format.</p></div></div>
+        <div class="actions">
+          <a class="button" href="/api/v1/export/inventory.csv">Inventory CSV</a>
+          <a class="button" href="/api/v1/export/clients.csv">Clients CSV</a>
+          <a class="button" href="/api/v1/export/transactions.csv">Transactions CSV</a>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><div><h2>Backup schedule</h2><p class="muted">The reminder is shared from SQLite. Each device shows it weekly until a backup is exported.</p></div></div>
+        <div class="form-row">
+          <div><label for="reminderDays">External backup reminder</label><select id="reminderDays"><option value="1">Every day</option><option value="3">Every 3 days</option><option value="7">Every week</option><option value="14">Every 2 weeks</option><option value="30">Every month</option></select></div>
+          <div><label for="autoHours">Automatic local snapshot</label><select id="autoHours"><option value="6">Every 6 hours</option><option value="12">Every 12 hours</option><option value="24">Every day</option><option value="48">Every 2 days</option><option value="168">Every week</option></select></div>
+        </div>
+        <div class="actions"><button id="saveSettings" class="primary">Save schedule</button></div>
+      </article>
+
+      <article class="card wide">
+        <div class="card-head"><div><h2>Connect other devices</h2><p class="muted">All devices use this one SQLite database through the Python server—never copy or share the live .db file.</p></div><span id="connectionBadge" class="badge">0 devices</span></div>
+        <div id="lanUrls"></div>
+        <div class="steps">
+          <div class="step">Keep this computer and the Python server running.</div>
+          <div class="step">Connect phones, tablets, and PCs to the same Wi-Fi network.</div>
+          <div class="step">Open one of the LAN addresses above on every device and sign in.</div>
+          <div class="step">Changes are broadcast immediately; cached mode is read-only to prevent double-selling.</div>
+        </div>
+        <div id="devices" style="margin-top:16px"></div>
+      </article>
+
+      <article class="card wide">
+        <div class="card-head"><div><h2>Recent server backups</h2><p class="muted">Automatic backups are kept locally with rolling retention. External/pen-drive copies provide disaster protection.</p></div></div>
+        <div id="backupHistory"></div>
+      </article>
+    </section>
+  </main>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    (() => {
+      const $ = id => document.getElementById(id);
+      let busy = false;
+      let refreshTimer = null;
+      const goBack = () => { try { const previous=new URL(document.referrer); if(previous.origin===location.origin && previous.pathname!==location.pathname){ history.back(); return; } }catch(_){ } location.href="/ADMINPRO.html"; };
+      document.querySelectorAll(".settingsBack").forEach(button => button.addEventListener("click", goBack));
+      const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+      const dateText = value => value ? new Date(value).toLocaleString() : "Never";
+      const sizeText = value => value > 1048576 ? `${(value / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1024))} KB`;
+      function toast(message) { const node=$("toast"); node.textContent=message; node.classList.add("show"); setTimeout(()=>node.classList.remove("show"),3500); }
+      function setBusy(value) { busy=value; document.querySelectorAll("button").forEach(button => button.disabled=value); }
+
+      async function load(showToast=false) {
+        try {
+          const result = await IconAPI.request("/api/v1/settings");
+          const data = result.data;
+          const counts = data.database.counts;
+          $("productCount").textContent=counts.products;
+          $("unitCount").textContent=counts.units;
+          $("clientCount").textContent=counts.clients;
+          $("transactionCount").textContent=counts.transactions;
+          $("healthBadge").textContent=data.database.integrity === "ok" ? `Healthy · revision ${data.database.revision}` : data.database.integrity;
+          $("healthBadge").className=`badge ${data.database.integrity === "ok" ? "" : "warn"}`;
+          $("backupBadge").textContent=data.backup.due ? "Backup due" : "Up to date";
+          $("backupBadge").className=`badge ${data.backup.due ? "warn" : ""}`;
+          $("backupInfo").textContent=`Last pen-drive/download backup: ${dateText(data.backup.lastExternalBackupAt)}. Next reminder: ${dateText(data.backup.nextReminderAt)}.`;
+          $("reminder").textContent="Weekly backup reminder: create an external backup and keep a copy on a pen drive or another safe device.";
+          $("reminder").className=`reminder ${data.backup.due ? "show" : ""}`;
+          $("reminderDays").value=String(data.settings.backupIntervalDays);
+          $("autoHours").value=String(data.settings.automaticBackupIntervalHours);
+          const connections=data.connections;
+          $("connectionBadge").textContent=`${connections.devices} device${connections.devices===1?"":"s"} live`;
+          $("lanUrls").innerHTML=(data.lanUrls||[]).map(url=>`<div class="url-row"><code>${esc(url)}</code><button data-copy="${esc(url)}">Copy</button><img src="/api/v1/qr?size=88&data=${encodeURIComponent(url)}" width="54" height="54" alt="LAN QR"></div>`).join("") || '<p class="muted">No private LAN address was detected. Check the computer network connection.</p>';
+          $("devices").innerHTML=connections.items.length ? `<h2>Live connections</h2>${connections.items.map(item=>`<div class="device"><span><strong>${esc(item.ip)}</strong><br><span class="muted">${esc(item.deviceId)}</span></span><span class="muted">Since ${esc(dateText(item.connectedAt))}</span></div>`).join("")}` : '<p class="muted">No browser sync connection is active yet.</p>';
+          $("backupHistory").innerHTML=data.backups.length ? data.backups.map(item=>`<div class="backup-row"><span><strong>${esc(item.filename)}</strong><br><span class="muted">${esc(dateText(item.createdAt))}</span></span><span>${esc(sizeText(item.size))}</span></div>`).join("") : '<p class="muted">No local backup snapshots yet.</p>';
+          document.querySelectorAll("[data-copy]").forEach(button=>button.onclick=()=>navigator.clipboard.writeText(button.dataset.copy).then(()=>toast("LAN address copied.")));
+          if(showToast) toast("Settings refreshed.");
+        } catch(error) {
+          if(error.status===401){ $("app").hidden=true; $("login").hidden=false; }
+          else toast(error.message||"Could not load settings.");
+        }
+      }
+
+      async function fetchBackup() {
+        const response=await fetch("/api/v1/backup",{credentials:"same-origin",cache:"no-store"});
+        if(!response.ok){ let value={}; try{value=await response.json();}catch(_){ } throw new Error(value.error||`Backup failed (${response.status})`); }
+        const blob=await response.blob();
+        const header=response.headers.get("content-disposition")||"";
+        const match=header.match(/filename="?([^";]+)"?/i);
+        return {blob,filename:match?match[1]:`icon-mobile-backup-${Date.now()}.db`};
+      }
+      function browserDownload(blob,filename){ const url=URL.createObjectURL(blob); const link=document.createElement("a"); link.href=url; link.download=filename; link.click(); setTimeout(()=>URL.revokeObjectURL(url),1500); }
+      async function downloadBackup(mode) {
+        if(busy)return; setBusy(true);
+        try{
+          const file=await fetchBackup();
+          if(mode==="pen" && window.showSaveFilePicker){
+            const handle=await showSaveFilePicker({suggestedName:file.filename,types:[{description:"SQLite backup",accept:{"application/vnd.sqlite3":[".db"]}}]});
+            const writable=await handle.createWritable(); await writable.write(file.blob); await writable.close(); toast("Backup saved. Select your pen drive in the save window.");
+          } else if(mode==="share" && navigator.share){
+            const shareFile=new File([file.blob],file.filename,{type:"application/vnd.sqlite3"});
+            if(!navigator.canShare || navigator.canShare({files:[shareFile]})){ await navigator.share({title:"ICON MOBILE SQLite Backup",text:"ICON MOBILE ERP database backup",files:[shareFile]}); toast("Backup shared."); }
+            else { browserDownload(file.blob,file.filename); window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent("ICON MOBILE backup downloaded. Please attach the .db file from Downloads.")}`,"_blank"); }
+          } else {
+            browserDownload(file.blob,file.filename);
+            if(mode==="pen") toast("Backup downloaded. Choose/move it to your pen drive.");
+            else if(mode==="share") window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent("ICON MOBILE backup downloaded. Please attach the .db file from Downloads.")}`,"_blank");
+            else toast("Complete SQLite backup downloaded.");
+          }
+          await load(false);
+        }catch(error){ if(error.name!=="AbortError")toast(error.message||"Backup failed."); }
+        finally{setBusy(false);}
+      }
+
+      $("loginForm").onsubmit=async event=>{ event.preventDefault(); $("loginError").textContent=""; try{ await IconAPI.login("admin",$("password").value); $("password").value=""; $("login").hidden=true; $("app").hidden=false; await load(); refreshTimer=setInterval(()=>load(false),5000); }catch(error){ $("loginError").textContent=error.message||"Login failed."; } };
+      $("logout").onclick=async()=>{ clearInterval(refreshTimer); await IconAPI.logout(); $("app").hidden=true; $("login").hidden=false; };
+      $("refresh").onclick=()=>load(true);
+      $("downloadBackup").onclick=()=>downloadBackup("download");
+      $("penDriveBackup").onclick=()=>downloadBackup("pen");
+      $("shareBackup").onclick=()=>downloadBackup("share");
+      $("saveSettings").onclick=async()=>{ if(busy)return; setBusy(true); try{ await IconAPI.request("/api/v1/settings",{method:"POST",body:{backupIntervalDays:Number($("reminderDays").value),automaticBackupIntervalHours:Number($("autoHours").value)}}); toast("Backup schedule saved."); await load(); }catch(error){toast(error.message||"Could not save settings.");}finally{setBusy(false);} };
+      $("restoreBackup").onclick=async()=>{ const file=$("restoreFile").files[0]; if(!file)return toast("Choose a SQLite backup file first."); if(!confirm("Restore this backup? The current database will be backed up first and all connected devices will refresh."))return; setBusy(true); try{const form=new FormData();form.append("file",file);await IconAPI.request("/api/v1/restore",{method:"POST",body:form,timeoutMs:120000});toast("Database restored and validated.");$("restoreFile").value="";await load();}catch(error){toast(error.message||"Restore failed.");}finally{setBusy(false);} };
+    })();
+  </script>
+</body>
+</html>

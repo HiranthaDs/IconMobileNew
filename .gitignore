@@ -1,0 +1,11 @@
+.env
+.erp_session_secret
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+*.db-wal
+*.db-shm
+_backups/*.db
+_backups/*.tmp
+.pytest_cache/

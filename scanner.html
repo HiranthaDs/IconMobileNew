@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>ICON MOBILE - LAN Scanner</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;background:#07111f;color:white;font-family:Inter,system-ui,sans-serif;display:grid;place-items:center;padding:18px}.panel{width:min(480px,100%);background:#101d2e;border:1px solid #26364b;border-radius:26px;padding:20px;box-shadow:0 28px 80px #0008}.head{display:flex;align-items:center;gap:12px;margin-bottom:18px}.head img{width:48px;height:48px;object-fit:contain;background:white;border-radius:14px;padding:4px}h1{font-size:20px;margin:0}p{margin:4px 0 0;color:#9fb0c5;font-size:12px;line-height:1.5}.status{padding:11px 13px;border-radius:12px;background:#17283e;color:#fdb022;font-size:12px;font-weight:800;margin-bottom:14px}.status.ok{color:#32d583;background:#12352d}.camera{position:relative;overflow:hidden;aspect-ratio:4/3;border-radius:18px;background:#050b12;margin-bottom:14px}.camera video{width:100%;height:100%;object-fit:cover}.line{position:absolute;left:10%;right:10%;top:50%;height:2px;background:#32d583;box-shadow:0 0 15px #32d583}.manual{display:flex;gap:8px}.manual input{min-width:0;flex:1;border:1px solid #344761;border-radius:12px;background:#07111f;color:white;padding:12px;font:inherit}.manual button,.camera button{border:0;border-radius:12px;background:#1677ff;color:white;padding:12px 16px;font-weight:800}.camera button{position:absolute;bottom:12px;left:12px}.last{margin-top:14px;padding:12px;background:#07111f;border-radius:12px;color:#9fb0c5;font-size:12px;word-break:break-all}.help{margin-top:12px;text-align:center}.hidden{display:none}
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <div class="head"><img src="/logo.png" alt=""><div><h1>Mobile IMEI / Barcode Scanner</h1><p>Send a code directly to the open inventory screen.</p></div></div>
+    <div id="status" class="status">Connecting to the host screen…</div>
+    <div class="camera"><video id="video" playsinline muted></video><div class="line"></div><button id="cameraButton">Start camera</button></div>
+    <form id="manualForm" class="manual"><input id="manualCode" autocomplete="off" inputmode="numeric" placeholder="Enter IMEI / serial manually"><button type="submit">Send</button></form>
+    <div id="last" class="last">No code sent yet.</div>
+    <p class="help">Camera scanning requires browser permission and may require HTTPS on some phones. Manual entry always works.</p>
+  </main>
+  <script>
+    (()=>{
+      const target=new URLSearchParams(location.search).get("id")||"";
+      const status=document.getElementById("status"),last=document.getElementById("last"),video=document.getElementById("video");
+      let connection=null,stream=null,scanning=false,lastCode="",lastAt=0;
+      const setStatus=(text,ok=false)=>{status.textContent=text;status.className=`status ${ok?"ok":""}`};
+      const send=code=>{code=String(code||"").trim();if(!code)return;if(!connection||connection.readyState!==WebSocket.OPEN)return setStatus("Host is not connected. Keep the QR screen open and retry.");connection.send(JSON.stringify({value:code}));last.textContent=`Sent: ${code}`;navigator.vibrate?.(80);};
+      if(!target)setStatus("This scanner link is missing its connection ID.");
+      else{
+        const scheme=location.protocol==="https:"?"wss:":"ws:";
+        connection=new WebSocket(`${scheme}//${location.host}/api/v1/scanner/${encodeURIComponent(target)}?role=scanner`);
+        connection.onopen=()=>setStatus("Connected. Scan or enter a code.",true);
+        connection.onclose=()=>setStatus("Host screen disconnected.");
+        connection.onerror=()=>setStatus("Scanner connection failed. Check Wi-Fi and keep the host QR open.");
+        connection.onmessage=message=>{try{const event=JSON.parse(message.data);if(event.type==="status"&&!event.connected)setStatus("Connected to server, waiting for the host QR screen…");if(event.type==="ack")setStatus("Code delivered to host.",true);}catch(_){}};
+      }
+      document.getElementById("manualForm").onsubmit=event=>{event.preventDefault();send(document.getElementById("manualCode").value);document.getElementById("manualCode").value="";};
+      document.getElementById("cameraButton").onclick=async()=>{
+        if(stream){stream.getTracks().forEach(track=>track.stop());stream=null;scanning=false;video.srcObject=null;document.getElementById("cameraButton").textContent="Start camera";return;}
+        try{
+          stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});video.srcObject=stream;await video.play();document.getElementById("cameraButton").textContent="Stop camera";
+          if(!("BarcodeDetector" in window)){setStatus("Camera opened, but automatic barcode detection is not supported. Use manual entry.");return;}
+          const detector=new BarcodeDetector({formats:["code_128","code_39","ean_13","ean_8","qr_code","data_matrix"]});scanning=true;
+          const loop=async()=>{if(!scanning||!stream)return;try{const codes=await detector.detect(video);if(codes.length){const value=codes[0].rawValue;const now=Date.now();if(value&&(value!==lastCode||now-lastAt>2500)){lastCode=value;lastAt=now;send(value);}}}catch(_){}requestAnimationFrame(loop);};loop();
+        }catch(error){setStatus(`Camera unavailable: ${error.message||error}`);}
+      };
+      addEventListener("beforeunload",()=>{stream?.getTracks().forEach(track=>track.stop());connection?.close();});
+    })();
+  </script>
+</body>
+</html>

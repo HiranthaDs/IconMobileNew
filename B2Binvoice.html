@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ICON MOBILE - Partner Statement</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/local-api.js"></script>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#eef2f7;color:#172033;font-family:Inter,system-ui,sans-serif}.bar{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 20px;background:#fffffff2;border-bottom:1px solid #dce2ea;backdrop-filter:blur(12px)}.bar a,.bar button{border:0;border-radius:11px;padding:9px 13px;background:#172033;color:white;text-decoration:none;font-weight:800;font-size:12px}.paper{width:min(960px,calc(100% - 24px));margin:20px auto;background:white;min-height:1120px;padding:42px;border-radius:20px;box-shadow:0 20px 60px #10182818}.head{display:flex;justify-content:space-between;gap:20px;padding-bottom:22px;border-bottom:3px solid #172033}.head img{width:85px;height:85px;object-fit:contain}.head h1{margin:0;font-size:28px}.head p{margin:5px 0 0;color:#667085;font-size:12px}.partner{margin:24px 0;display:flex;justify-content:space-between;gap:18px}.partner h2{margin:0;font-size:21px}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0}.box{background:#f8fafc;border:1px solid #e4e7ec;border-radius:14px;padding:13px}.box span{font-size:10px;color:#667085;text-transform:uppercase;font-weight:800}.box strong{display:block;margin-top:5px;font-size:17px}.red{color:#d92d20}.green{color:#067647}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;background:#172033;color:white;padding:10px}td{padding:10px;border-bottom:1px solid #e4e7ec;vertical-align:top}.items{font-size:10px;color:#667085;margin-top:4px}.empty{text-align:center;padding:70px;color:#667085}.login{min-height:100vh;display:grid;place-items:center}.login form{width:min(380px,calc(100% - 28px));background:white;padding:28px;border-radius:22px;text-align:center;box-shadow:0 20px 60px #10182820}.login img{width:80px}.login input{width:100%;padding:12px;border:1px solid #d0d5dd;border-radius:12px;margin:18px 0 9px}.login button{width:100%;border:0;border-radius:12px;padding:12px;background:#1677ff;color:white;font-weight:800}.error{color:#d92d20;font-size:12px;margin-top:8px}@media(max-width:700px){.paper{padding:22px}.summary{grid-template-columns:1fr 1fr}.partner,.head{flex-direction:column}table{display:block;overflow:auto}}@media print{body{background:white}.bar{display:none}.paper{width:100%;margin:0;padding:25px;box-shadow:none;border-radius:0}}
+  </style>
+</head>
+<body>
+  <section id="login" class="login"><form id="loginForm"><img src="/logo.png" alt=""><h1>Partner Statement</h1><p>Wholesale login required</p><input id="password" type="password" placeholder="Wholesale password" required><button>Open Statement</button><div id="error" class="error"></div></form></section>
+  <section id="document" hidden>
+    <div class="bar"><a href="/wholesale.html">Back to Wholesale</a><div><button id="refresh">Refresh</button> <button onclick="window.print()">Print / PDF</button></div></div>
+    <article class="paper">
+      <header class="head"><div><h1>PARTNER LEDGER STATEMENT</h1><p>Official local SQLite record · ICON MOBILE</p></div><img src="/logo.png" alt="ICON MOBILE"></header>
+      <section class="partner"><div><p>PARTNER</p><h2 id="partnerName">-</h2><p id="partnerPhone">-</p></div><div style="text-align:right"><p>GENERATED</p><strong id="generated"></strong></div></section>
+      <section class="summary"><div class="box"><span>Total issued</span><strong id="issued">LKR 0</strong></div><div class="box"><span>Payments</span><strong id="paid" class="green">LKR 0</strong></div><div class="box"><span>Returns</span><strong id="returned">LKR 0</strong></div><div class="box"><span>Balance</span><strong id="balance" class="red">LKR 0</strong></div></section>
+      <table><thead><tr><th>Date</th><th>Reference</th><th>Type / items</th><th>Amount</th></tr></thead><tbody id="rows"></tbody></table>
+      <div id="empty" class="empty" hidden>No matching partner records were found.</div>
+    </article>
+  </section>
+  <script>
+    (()=>{
+      const $=id=>document.getElementById(id),params=new URLSearchParams(location.search),wantedName=(params.get("name")||"").trim(),wantedInvoice=(params.get("invoice")||"").trim();
+      const clean=value=>String(value??"").trim(),num=value=>{const n=Number(String(value??0).replace(/,/g,""));return Number.isFinite(n)?n:0},money=value=>`LKR ${num(value).toLocaleString("en-US",{maximumFractionDigits:2})}`,escape=value=>clean(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+      const partnerName=tx=>clean(tx.partnerName||tx.name||tx.client?.partnerName||tx.client?.shopName||tx.client?.name);
+      const type=tx=>clean(tx.transactionType||tx.client?.transactionType||"Sale");
+      const amount=tx=>{const t=type(tx);if(/payment/i.test(t))return num(tx.paymentAmount||tx.client?.paymentAmount||tx.amount);if(/return/i.test(t))return num(tx.refundValue||tx.refundAmount||tx.total);return num(tx.total||tx.totalPrice)};
+      async function load(){
+        const result=await IconAPI.getSnapshot(),all=result.data.transactions||[];
+        let records=all.filter(tx=>partnerName(tx).toLowerCase()===wantedName.toLowerCase());if(wantedInvoice)records=records.filter(tx=>clean(tx.invoiceId||tx.client?.invoiceId)===wantedInvoice);
+        const first=records[0]||{},name=wantedName||partnerName(first)||"Unknown Partner",phone=clean(first.phone||first.client?.phone||first.whatsapp||first.client?.whatsapp)||"No phone";
+        $("partnerName").textContent=name;$("partnerPhone").textContent=phone;$("generated").textContent=new Date().toLocaleString();document.title=`Partner_Statement_${name.replace(/[^a-z0-9]/gi,"_")}`;
+        let issued=0,paid=0,returned=0;records.forEach(tx=>{/payment/i.test(type(tx))?paid+=amount(tx):/return/i.test(type(tx))?returned+=amount(tx):issued+=amount(tx)});$("issued").textContent=money(issued);$("paid").textContent=money(paid);$("returned").textContent=money(returned);$("balance").textContent=money(Math.max(0,issued-paid-returned));
+        $("rows").innerHTML=records.map(tx=>{const items=Array.isArray(tx.items)?tx.items:Array.isArray(tx.purchasedItems)?tx.purchasedItems:[];const itemText=items.map(item=>`${clean(item.Brand)} ${clean(item.Model)} ${clean(item.unitImei||item.IMEI||item["IMEI or Item Code"])}`.trim()).filter(Boolean).join(" · ");return `<tr><td>${escape(new Date(tx.date||tx.createdAt||Date.now()).toLocaleString())}</td><td><strong>${escape(tx.invoiceId||tx.id||"-")}</strong></td><td><strong>${escape(type(tx))}</strong><div class="items">${escape(itemText)}</div></td><td><strong>${escape(money(amount(tx)))}</strong></td></tr>`}).join("");$("empty").hidden=records.length>0;
+      }
+      $("loginForm").onsubmit=async event=>{event.preventDefault();$("error").textContent="";try{await IconAPI.login("wholesale",$("password").value);$("login").hidden=true;$("document").hidden=false;await load();IconAPI.subscribe(()=>load().catch(()=>{}));}catch(error){$("error").textContent=error.message||"Login failed";}};$("refresh").onclick=()=>load().catch(error=>alert(error.message));
+    })();
+  </script>
+</body>
+</html>

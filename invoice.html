@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ICON MOBILE - Digital Invoice View</title>
+    
+    <link rel="stylesheet" href="/assets/app.css">
+    <script src="/assets/vendor/react.production.min.js"></script>
+    <script src="/assets/vendor/react-dom.production.min.js"></script>
+    <script src="/assets/vendor/babel.min.js"></script>
+    <script src="/assets/local-api.js"></script>
+
+    <style>
+        :root {
+            --win-bg: #E5E5E5;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--win-bg); 
+            color: #1d1d1f;
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        @media print {
+            @page { size: A4 portrait; margin: 0; }
+            html, body {
+                width: 210mm !important;
+                height: 297mm !important;
+                max-height: 297mm !important;
+                background-color: #ffffff !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            .no-print { display: none !important; }
+            .invoice-wrapper {
+                display: block !important;
+                overflow: visible !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                background: none !important;
+            }
+            .invoice-page { 
+                width: 210mm !important; 
+                height: 297mm !important;
+                max-height: 297mm !important;
+                background-color: #ffffff !important;
+                box-shadow: none !important;
+                margin: 0 !important;
+                padding: 12mm 15mm !important;
+                border-radius: 0 !important;
+                position: absolute !important;
+                top: 0 !important; 
+                left: 0 !important;
+                display: flex !important;
+                flex-direction: column !important;
+                page-break-after: avoid !important;
+                page-break-inside: avoid !important;
+                transform: none !important; /* Force reset scaling on print */
+            }
+            .print-row { flex-direction: row !important; }
+            .print-w-45 { width: 45% !important; }
+            .print-w-55 { width: 55% !important; }
+            .print-overflow-visible { overflow: visible !important; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+    
+
+    /* Safe startup screen: prevents invisible blank pages when CDN/Babel/backend fails */
+    .boot-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at top left,#e0f2fe 0,transparent 36%),radial-gradient(circle at bottom right,#dbeafe 0,transparent 34%),#f8fafc; padding:24px; font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,sans-serif; }
+    .boot-card { width:min(430px,100%); background:rgba(255,255,255,.86); border:1px solid rgba(255,255,255,.74); border-radius:32px; padding:32px; text-align:center; box-shadow:0 30px 90px rgba(15,23,42,.16); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%); }
+    .boot-spinner { width:48px; height:48px; border-radius:999px; border:4px solid rgba(37,99,235,.14); border-top-color:#2563eb; animation:bootSpin .9s linear infinite; margin:0 auto 18px; }
+    @keyframes bootSpin { to { transform:rotate(360deg); } }
+
+  </style>
+</head>
+<body>
+    <div id="root" class="w-full h-full">
+    <div class="boot-screen">
+      <div class="boot-card">
+        <div class="boot-spinner"></div>
+        <h1 style="font-size:22px;font-weight:900;letter-spacing:-.04em;margin:0;color:#0f172a;">ICON MOBILE ERP</h1>
+        <p style="font-size:13px;font-weight:700;color:#64748b;margin:8px 0 0;line-height:1.5;">Loading system safely...</p>
+      </div>
+    </div>
+  </div>
+
+    
+  <script>
+    (function(){
+      window.__ICON_BOOT_ERROR__ = function(message){
+        var root = document.getElementById('root');
+        if (!root) return;
+        var safe = String(message || 'Unknown startup error').replace(/[<>&]/g, function(c){ return ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]); });
+        root.innerHTML = '<div class="boot-screen"><div class="boot-card"><div style="width:56px;height:56px;border-radius:22px;background:#fee2e2;color:#dc2626;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-weight:900;font-size:24px;">!</div><h1 style="font-size:22px;font-weight:900;margin:0;color:#0f172a;">Application could not start</h1><p style="font-size:13px;font-weight:700;color:#64748b;margin:10px 0 0;line-height:1.55;">'+ safe +'</p><p style="font-size:12px;color:#94a3b8;margin-top:14px;line-height:1.5;">Open this invoice through the ICON MOBILE Python server and verify local assets are installed.</p></div></div>';
+      };
+      window.addEventListener('error', function(e){
+        if (!document.body.classList.contains('app-mounted')) window.__ICON_BOOT_ERROR__(e.message || 'Startup script error');
+      });
+      window.addEventListener('unhandledrejection', function(e){
+        if (!document.body.classList.contains('app-mounted')) window.__ICON_BOOT_ERROR__((e.reason && (e.reason.stack || e.reason.message || e.reason)) || 'Startup promise error');
+      });
+      setTimeout(function(){
+        if (!document.body.classList.contains('app-mounted')) {
+          var root = document.getElementById('root');
+          if (root && /Loading/i.test(root.textContent || '')) window.__ICON_BOOT_ERROR__('The app is taking too long to start. Check the Python server and local browser assets.');
+        }
+      }, 18000);
+    })();
+  </script>
+
+  <script type="text/babel">
+try {
+if (!window.React || !window.ReactDOM) { throw new Error('Local React assets did not load. Run setup.ps1 and use the Python server.'); }
+if (!window.Babel) { throw new Error('Local Babel asset did not load. Run setup.ps1.'); }
+if (!window.IconAPI) { throw new Error('Local API client did not load. Open this invoice through the ICON MOBILE Python server.'); }
+
+        const { useState, useEffect, useCallback } = React;
+
+        const Icons = {
+            Download: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
+            Alert: () => <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-500"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
+            Star: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-500"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
+            Check: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>,
+            Shield: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        };
+
+        class ErrorBoundary extends React.Component {
+            constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+            static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center p-6">
+                            <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-lg border border-red-200 text-center">
+                                <div className="flex justify-center mb-4"><Icons.Alert /></div>
+                                <h2 className="text-xl font-black text-gray-900 mb-2">Rendering Error</h2>
+                                <p className="text-sm text-gray-600 mb-4">We encountered a problem displaying this invoice data.</p>
+                                <div className="bg-gray-50 p-4 rounded-lg overflow-x-auto text-xs font-mono text-red-600 text-left mb-6">{this.state.error?.toString()}</div>
+                                <button onClick={() => window.location.reload()} className="w-full py-3 bg-[#007aff] hover:bg-[#005bb5] text-white font-bold rounded-xl shadow-md">Reload Page</button>
+                            </div>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        const formatMoney = (val) => { const num = parseFloat(val); if (isNaN(num)) return "0"; return num.toLocaleString('en-US'); };
+        const formatMoneyDec = (val) => { const num = parseFloat(val); if (isNaN(num)) return "0.00"; return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+
+        const formatSpecsForPdf = (specsStr) => {
+            if (!specsStr) return "";
+            if (typeof specsStr === 'object') {
+                let display = [];
+                if (specsStr.RAM) display.push(`${specsStr.RAM} RAM`);
+                if (specsStr.ROM) display.push(`${specsStr.ROM} ROM`);
+                return display.join(' • ');
+            }
+            const str = String(specsStr);
+            if (str.startsWith('{')) {
+                try {
+                    const parsed = JSON.parse(str); let display = [];
+                    if (parsed.RAM && parsed.RAM.toLowerCase() !== 'none') display.push(`${parsed.RAM} RAM`);
+                    if (parsed.ROM && parsed.ROM.toLowerCase() !== 'none') display.push(`${parsed.ROM} ROM`);
+                    return display.join(' • ');
+                } catch (e) { return str; }
+            }
+            return str;
+        };
+
+        const safePrice = (priceVal) => {
+            const num = parseFloat(String(priceVal || '0').replace(/[^0-9.-]+/g,""));
+            return isNaN(num) ? 0 : num;
+        };
+
+        const getInvoiceLink = (id) => {
+            return window.IconAPI.getShareUrl(`/invoice.html?id=${encodeURIComponent(id || '')}`);
+        };
+
+        const INVOICE_CACHE_PREFIX = "ICON_MOBILE_INVOICE_LOCAL_SQLITE_V1:";
+        const invoiceSafeStorage = {
+            get(key, fallback = null) { try { return localStorage.getItem(key) ?? fallback; } catch(e) { return fallback; } },
+            set(key, value) { try { localStorage.setItem(key, value); } catch(e) {} }
+        };
+        const safeParseJSON = (value, fallback = null) => {
+            if (value === null || value === undefined || value === '') return fallback;
+            if (typeof value === 'object') return value;
+            try { return JSON.parse(String(value)); } catch(e) { return fallback; }
+        };
+        const normalizeInvoiceRecord = (record) => {
+            if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
+            const nested = record.client && typeof record.client === 'object' ? record.client : {};
+            let items = record.purchasedItems || record.items || nested.purchasedItems || nested.items || [];
+            if (typeof items === 'string') items = safeParseJSON(items, []);
+            if (!Array.isArray(items)) items = [];
+            const invoiceId = String(record.invoiceId || nested.invoiceId || record.id || record.ref || '').trim();
+            if (!invoiceId) return null;
+            return { ...record, invoiceId, client: { ...nested, invoiceId, name: nested.name || record.name || record.customerName || 'Customer', phone: nested.phone || record.phone || '', email: nested.email || record.email || '' }, purchasedItems: items, items };
+        };
+        const App = () => {
+            const [invoiceData, setInvoiceData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState("");
+            const [qrLoaded, setQrLoaded] = useState(false);
+            const [scale, setScale] = useState(1);
+
+            useEffect(() => {
+                const updateScale = () => {
+                    if (window.matchMedia('print').matches) {
+                        setScale(1); 
+                        return;
+                    }
+                    const screenWidth = window.innerWidth;
+                    const invoiceWidthPx = 794; 
+                    
+                    if (screenWidth < invoiceWidthPx + 32) {
+                        setScale((screenWidth - 24) / invoiceWidthPx);
+                    } else {
+                        setScale(1);
+                    }
+                };
+
+                updateScale();
+                window.addEventListener('resize', updateScale);
+                
+                const printQuery = window.matchMedia('print');
+                if (printQuery.addEventListener) {
+                    printQuery.addEventListener('change', updateScale);
+                } else {
+                    printQuery.addListener(updateScale); 
+                }
+
+                return () => {
+                    window.removeEventListener('resize', updateScale);
+                    if (printQuery.removeEventListener) {
+                        printQuery.removeEventListener('change', updateScale);
+                    } else {
+                        printQuery.removeListener(updateScale);
+                    }
+                };
+            }, []);
+
+            const fetchInvoice = useCallback(async (silent = false) => {
+                if (!silent) { setLoading(true); setError(""); }
+                const urlParams = new URLSearchParams(window.location.search);
+                const targetId = String(urlParams.get('id') || '').trim();
+                if (!targetId) {
+                    if (!silent) { setError("No Invoice ID provided in the link."); setLoading(false); }
+                    return;
+                }
+                const cacheKey = INVOICE_CACHE_PREFIX + targetId;
+                const applyInvoice = (record) => {
+                    const normalized = normalizeInvoiceRecord(record);
+                    if (!normalized) throw new Error(`Invoice ${targetId} could not be found in the local database.`);
+                    setInvoiceData(normalized);
+                    setError("");
+                    const safeClientName = String(normalized.name || normalized.client?.name || 'Customer').replace(/[^a-zA-Z0-9]/g, '_');
+                    document.title = `Invoice_${safeClientName}_${normalized.invoiceId || normalized.client?.invoiceId}`;
+                    return normalized;
+                };
+                try {
+                    const result = await window.IconAPI.getInvoice(targetId);
+                    if (!result || result.success !== true) throw new Error(result?.error || result?.message || 'Invoice request failed.');
+                    const payload = result.data || {};
+                    const found = payload.transaction || payload.invoice || result.transaction || result.invoice || payload;
+                    const normalized = applyInvoice(found);
+                    invoiceSafeStorage.set(cacheKey, JSON.stringify({ invoice: normalized, savedAt: Date.now() }));
+                } catch (e) {
+                    console.error('Invoice load failed:', e);
+                    const cachedEnvelope = safeParseJSON(invoiceSafeStorage.get(cacheKey, ''), null);
+                    if (cachedEnvelope && cachedEnvelope.invoice) {
+                        try { applyInvoice(cachedEnvelope.invoice); }
+                        catch (cacheError) { if (!silent) setError(`Failed to load invoice: ${e.message || e}`); }
+                    } else if (!silent) {
+                        setError(`Failed to connect to the ICON MOBILE local database: ${e.message || e}`);
+                    }
+                }
+                if (!silent) setLoading(false);
+            }, []);
+
+            useEffect(() => { fetchInvoice(false); }, [fetchInvoice]);
+            useEffect(() => {
+                const refreshSilently = () => fetchInvoice(true);
+                const unsubscribe = window.IconAPI.subscribe(refreshSilently);
+                window.addEventListener('online', refreshSilently);
+                window.addEventListener('focus', refreshSilently);
+                return () => {
+                    if (typeof unsubscribe === 'function') unsubscribe();
+                    window.removeEventListener('online', refreshSilently);
+                    window.removeEventListener('focus', refreshSilently);
+                };
+            }, [fetchInvoice]);
+
+            const handleDownloadPdf = () => { window.print(); };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-[#f5f5f7] flex flex-col items-center justify-center p-6">
+                        <div className="w-12 h-12 border-[4px] border-[#007aff] border-t-transparent rounded-full animate-spin mb-4"></div>
+                        <p className="text-gray-900 font-bold text-sm tracking-wide">Loading Official Document...</p>
+                    </div>
+                );
+            }
+
+            if (error || !invoiceData) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-6 bg-[#f5f5f7]">
+                        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-gray-200">
+                            <div className="flex justify-center mb-4"><Icons.Alert /></div>
+                            <h2 className="text-xl font-black text-gray-900 mb-2">Document Not Found</h2>
+                            <p className="text-gray-500 text-sm mb-6 leading-relaxed font-medium">{error}</p>
+                            <button onClick={() => fetchInvoice(false)} className="w-full py-3 bg-[#007aff] hover:bg-[#005bb5] text-white font-bold rounded-xl transition-colors shadow-md">Try Again</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            const client = invoiceData.client || invoiceData || {};
+            
+            let purchasedItems = [];
+            if (Array.isArray(invoiceData.purchasedItems)) purchasedItems = invoiceData.purchasedItems;
+            else if (Array.isArray(invoiceData.items)) purchasedItems = invoiceData.items;
+            else if (client && Array.isArray(client.purchasedItems)) purchasedItems = client.purchasedItems;
+            else if (typeof invoiceData.purchasedItems === 'string') { try { purchasedItems = JSON.parse(invoiceData.purchasedItems); } catch(e){} }
+            else if (typeof invoiceData.items === 'string') { try { purchasedItems = JSON.parse(invoiceData.items); } catch(e){} }
+
+            const displayDiscount = safePrice(invoiceData.discount || invoiceData.globalDiscount || client.discount);
+            const totalQuantity = invoiceData.totalQuantity || invoiceData.totalQty || client.totalQuantity || purchasedItems.length || 0;
+            let date = invoiceData.date || client.date || invoiceData.invoiceDate || invoiceData.timestamp || "";
+
+            const invoiceId = invoiceData.invoiceId || client.invoiceId || "";
+            const clientName = client.name || invoiceData.name || '-';
+            const clientPhone = client.phone || invoiceData.phone || '-';
+            const clientEmail = client.email || invoiceData.email || '';
+            const paymentMethod = client.paymentMethod || invoiceData.paymentMethod || 'CASH';
+
+            const baseSubTotal = purchasedItems.reduce((sum, item) => sum + (item.isExchange ? 0 : (parseFloat(item.Price) || parseFloat(item.sellPrice) || 0) * (item.cartQty || item.Quantity || 1)), 0);
+            const totalWarrantyCost = purchasedItems.reduce((sum, item) => sum + (item.isExchange ? 0 : (parseFloat(item.warranty?.extendedPrice) || 0) * (item.cartQty || item.Quantity || 1)), 0);
+            const totalExchangeValue = purchasedItems.reduce((sum, item) => sum + (item.isExchange ? (parseFloat(item.buyPrice || item.Price) || 0) * (item.cartQty || item.Quantity || 1) : 0), 0);
+
+            const computedGrandTotal = baseSubTotal + totalWarrantyCost - totalExchangeValue - displayDiscount;
+
+            const itemsWithWarranty = purchasedItems.filter(item => !item.isExchange && (
+                (item.warranty?.p2p && item.warranty.p2p !== 'None' && item.warranty.p2p !== '') ||
+                (item.warranty?.hardware && item.warranty.hardware !== 'None' && item.warranty.hardware !== '') ||
+                (item.warranty?.software && item.warranty.software !== 'None' && item.warranty.software !== '') ||
+                (item.warranty?.global && item.warranty.global !== 'None' && item.warranty.global !== '') ||
+                (item.warranty?.extended && item.warranty.extended !== 'None' && item.warranty.extended !== '') ||
+                (item.warranty?.appleCare && item.warranty.appleCare !== 'None' && item.warranty.appleCare !== '')
+            ));
+
+            return (
+                <div className="min-h-screen pt-4 pb-[100px] flex flex-col items-center invoice-wrapper">
+                    
+                    {/* Floating Action Buttons */}
+                    <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:absolute sm:top-6 sm:right-6 sm:bottom-auto flex flex-row gap-3 no-print z-50">
+                        <button onClick={() => fetchInvoice(false)} className="flex items-center justify-center w-12 h-12 bg-white border border-gray-200 text-gray-700 hover:text-blue-600 rounded-xl sm:rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:bg-gray-50 transition-all hover:-translate-y-0.5" title="Refresh Invoice Data">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        </button>
+                        <button onClick={handleDownloadPdf} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-[#007aff] hover:bg-[#005bb5] text-white px-6 py-3 rounded-xl sm:rounded-full shadow-[0_8px_20px_rgba(0,122,255,0.4)] transition-transform hover:-translate-y-0.5 font-bold text-sm border-none cursor-pointer">
+                            <Icons.Download /> Save PDF
+                        </button>
+                    </div>
+
+                    <p className="text-gray-500 text-[10px] sm:text-xs font-semibold uppercase tracking-widest mb-4 mt-2 no-print text-center w-full">
+                        Official Digital Document
+                    </p>
+
+                    <div 
+                        className="w-full flex justify-center print-overflow-visible overflow-hidden" 
+                        style={{ height: `calc(${297 * scale}mm + 40px)` }}
+                    >
+                        <div 
+                            className="invoice-page shrink-0 relative bg-white shadow-2xl print:shadow-none box-border flex flex-col overflow-hidden text-[#1d1d1f]"
+                            style={{
+                                width: '210mm',
+                                minWidth: '210mm',
+                                height: '297mm',
+                                minHeight: '297mm',
+                                maxHeight: '297mm',
+                                padding: '15mm',
+                                transform: `scale(${scale})`,
+                                transformOrigin: 'top center'
+                            }}
+                        >
+                            
+                            <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none z-0"><img src="logo watermark.png" alt="" className="w-[80%] object-contain" onError={(e) => e.target.style.display='none'} /></div>
+                            <div className="relative z-10 flex flex-col w-full h-full flex-1">
+                                
+                                {/* Header with updated address and phone number */}
+                                <div className="shrink-0 flex flex-row print-row justify-between items-start border-b-2 border-[#1d1d1f] pb-4 mb-5 gap-4">
+                                    <div className="flex items-center gap-4">
+                                        <img src="logo.png" alt="Logo" className="h-[60px] w-[60px] object-contain rounded-xl" onError={(e) => e.target.style.display='none'} />
+                                        <div className="leading-tight">
+                                            <h1 className="text-[28px] font-black text-gray-900 tracking-tighter uppercase mb-0.5">ICON MOBILE</h1>
+                                            <p className="text-[10px] font-semibold text-gray-600">No:59, First Floor, Liberty Plaza, colombo 03</p>
+                                            <p className="text-[10px] font-semibold text-gray-600">+94 77 27 29 226</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-6">
+                                        <div className="text-right">
+                                            <h2 className="text-[24px] font-black text-[#007aff] tracking-widest uppercase leading-none mb-1.5">INVOICE</h2>
+                                            <div className="flex flex-col gap-[2px] text-[10px] text-gray-800 font-medium">
+                                                <div className="flex justify-end gap-2"><span className="text-gray-500 uppercase tracking-widest text-[8px] font-bold">Invoice No:</span><span className="font-bold">{invoiceId}</span></div>
+                                                <div className="flex justify-end gap-2"><span className="text-gray-500 uppercase tracking-widest text-[8px] font-bold">Date:</span><span className="font-bold">{date}</span></div>
+                                            </div>
+                                        </div>
+                                        <div className="border border-gray-300 p-1.5 bg-white rounded shadow-sm shrink-0">
+                                            <img src={`/api/v1/qr?size=80&data=${encodeURIComponent(getInvoiceLink(invoiceId))}`} alt="QR" onLoad={() => setQrLoaded(true)} onError={() => setQrLoaded(true)} className="w-[55px] h-[55px] object-contain" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Bill To & Payment */}
+                                <div className="shrink-0 flex justify-between items-start mb-6 gap-4">
+                                    <div className="flex flex-col text-gray-900 leading-tight">
+                                        <h3 className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">Bill To</h3>
+                                        <span className="text-[19px] font-black mb-1 tracking-tight">{clientName}</span>
+                                        <span className="text-[11px] font-semibold text-gray-600">{clientPhone}</span>
+                                        {clientEmail && <span className="text-[11px] font-semibold text-gray-600">{clientEmail}</span>}
+                                    </div>
+                                    <div className="text-right">
+                                        <h3 className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">Payment Method</h3>
+                                        <span className="text-[19px] font-black text-[#007aff] uppercase mt-1 block tracking-tight">{paymentMethod}</span>
+                                    </div>
+                                </div>
+
+                                {/* Items Table */}
+                                <div className="flex-1 min-h-[140px] w-full print-overflow-visible">
+                                    <table className="w-full text-[10px] border-collapse">
+                                        <thead>
+                                            <tr className="border-b-2 border-gray-200 text-gray-900">
+                                                <th className="py-2 text-left font-black w-[35%] uppercase tracking-widest text-[8.5px] text-gray-500">Description</th>
+                                                <th className="py-2 text-left font-black w-[25%] uppercase tracking-widest text-[8.5px] text-gray-500">Serial / ID</th>
+                                                <th className="py-2 text-left font-black w-[20%] uppercase tracking-widest text-[8.5px] text-gray-500">Warranty</th>
+                                                <th className="py-2 text-center font-black w-[5%] uppercase tracking-widest text-[8.5px] text-gray-500">Qty</th>
+                                                <th className="py-2 text-right font-black w-[15%] uppercase tracking-widest text-[8.5px] text-gray-500">Price (LKR)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {purchasedItems?.map((item, idx) => {
+                                                const itemDiscount = safePrice(item?.itemDiscount);
+                                                const basePrice = safePrice(item?.Price || item?.sellPrice);
+                                                const extPrice = safePrice(item?.warranty?.extendedPrice);
+                                                
+                                                const hasSoft = item?.warranty?.software && item.warranty.software !== 'None' && item.warranty.software !== '';
+                                                const hasGlob = item?.warranty?.global && item.warranty.global !== 'None' && item.warranty.global !== '';
+                                                const hasExt = item?.warranty?.extended && item.warranty.extended !== 'None' && item.warranty.extended !== '';
+                                                const hasAc = item?.warranty?.appleCare && item.warranty.appleCare !== 'None' && item.warranty.appleCare !== '';
+                                                const noWarrantyAtAll = !hasSoft && !hasGlob && !hasExt && !hasAc;
+
+                                                const formatW = (label, val, price = 0, isExt = false) => {
+                                                    if (!val || val === "None" || val === "") return null;
+                                                    let displayVal = val;
+                                                    return (
+                                                        <div key={label} className="leading-tight mb-0.5 flex items-start gap-1">
+                                                            {isExt && <span className="text-gray-400 shrink-0 inline-flex mt-[1px]"><Icons.Shield className="w-2.5 h-2.5" /></span>}
+                                                            <div><span className="text-gray-500 font-semibold">{label}:</span> <strong className="font-bold">{displayVal}</strong></div>
+                                                        </div>
+                                                    );
+                                                };
+
+                                                return (
+                                                    <tr key={idx} className="border-b border-gray-100 align-top text-gray-900">
+                                                        <td className="py-3 pr-2">
+                                                            <div className={`font-bold text-[12px] tracking-tight leading-tight mb-1 ${item?.isExchange ? 'text-green-600' : 'text-gray-900'}`}>
+                                                                {item?.isExchange && <span className="mr-1 text-[8.5px] font-black bg-green-100 text-green-700 px-1.5 py-0.5 rounded border border-green-200 uppercase tracking-widest">Exchange In</span>}
+                                                                {item?.Brand} {item?.Model}
+                                                            </div>
+                                                            {!item?.isExchange && <div className="text-[9.5px] text-gray-500 font-medium">{formatSpecsForPdf(item?.Specs)} {item?.Color ? `| ${item.Color}` : ''}</div>}
+                                                            {item?.isExchange && <div className="text-[9.5px] text-gray-500 font-medium mt-0.5">{formatSpecsForPdf(item?.Specs)}</div>}
+                                                        </td>
+                                                        <td className="py-3 pr-2 font-mono text-[10.5px] break-all leading-tight font-semibold text-gray-700">{item?.displayImei || item?.["IMEI or Item Code"] || item?.originalCode}</td>
+                                                        <td className="py-3 pr-2">
+                                                            {!item?.isExchange ? (
+                                                                <div className="flex flex-col text-[8.5px] leading-snug">
+                                                                    {formatW("Software", item?.warranty?.software)}
+                                                                    {formatW("Warranty", item?.warranty?.global)}
+                                                                    {formatW("Extended", item?.warranty?.extended, item?.warranty?.extendedPrice, true)}
+                                                                    {formatW("Apple Care", item?.warranty?.appleCare)}
+                                                                    {noWarrantyAtAll && <span className="text-[8.5px] text-gray-400 font-semibold italic">No Warranty Issued</span>}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-[8.5px] text-gray-400 italic">N/A</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="py-3 text-center font-bold text-[12px]">{item?.cartQty || item?.Quantity || 1}</td>
+                                                        <td className="py-3 pl-2 text-right">
+                                                            {item?.isExchange ? (
+                                                                <span className="font-bold text-green-600 text-[12px]">- {formatMoney(basePrice)}</span>
+                                                            ) : itemDiscount > 0 ? (
+                                                                <div className="flex flex-col items-end leading-tight">
+                                                                    <span className="text-[8.5px] text-red-500 line-through font-bold">{formatMoney(basePrice + extPrice)}</span>
+                                                                    <span className="font-bold text-[12px]">{formatMoney(basePrice + extPrice - itemDiscount)}</span>
+                                                                </div>
+                                                            ) : (
+                                                                <span className="font-bold text-[12px]">{formatMoney(basePrice + extPrice)}</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* Summary */}
+                                <div className="flex justify-end mb-6 shrink-0 mt-4">
+                                    <div className="w-64 border-t-2 border-gray-900 pt-2">
+                                        <div className="flex justify-between text-[11.5px] font-medium text-gray-600 mb-1">
+                                            <span className="uppercase tracking-widest text-[9px] font-bold text-gray-400">Total Quantity:</span>
+                                            <span className="font-bold text-gray-900">{totalQuantity}</span>
+                                        </div>
+                                        <div className="flex justify-between text-[11.5px] font-medium text-gray-600 mb-1">
+                                            <span className="uppercase tracking-widest text-[9px] font-bold text-gray-400">Base Subtotal:</span>
+                                            <span className="font-bold text-gray-900">LKR {formatMoney(baseSubTotal)}</span>
+                                        </div>
+                                        {totalWarrantyCost > 0 && (
+                                            <div className="flex justify-between text-[11.5px] font-bold text-blue-600 mb-1">
+                                                <span className="uppercase tracking-widest text-[9px]">Ext. Warranty:</span>
+                                                <span>+ LKR {formatMoney(totalWarrantyCost)}</span>
+                                            </div>
+                                        )}
+                                        {totalExchangeValue > 0 && (
+                                            <div className="flex justify-between text-[11.5px] font-bold text-green-600 mb-1">
+                                                <span className="uppercase tracking-widest text-[9px]">Exchange Value:</span>
+                                                <span>- LKR {formatMoney(totalExchangeValue)}</span>
+                                            </div>
+                                        )}
+                                        {displayDiscount > 0 && (
+                                            <div className="flex justify-between text-[11.5px] font-bold text-red-500 mb-1">
+                                                <span className="uppercase tracking-widest text-[9px]">Discount:</span>
+                                                <span>- LKR {formatMoney(displayDiscount)}</span>
+                                            </div>
+                                        )}
+                                        <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-gray-200 relative">
+                                            <span className="text-[10.5px] font-black text-gray-900 uppercase tracking-widest">Grand Total:</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-[17px] font-black tracking-tighter ${computedGrandTotal < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                                                    {computedGrandTotal < 0 ? '+ LKR ' : 'LKR '} {formatMoney(Math.abs(computedGrandTotal))}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Footer Data */}
+                                <div className="flex flex-row print-row gap-8 mt-auto shrink-0 text-[9px] text-gray-800 items-stretch pt-4">
+                                    <div className="w-[45%] print-w-45 flex flex-col justify-between self-stretch">
+                                        <div className="flex flex-col gap-4">
+                                            <div className="flex flex-col gap-3">
+                                                <div className="flex items-center gap-3">
+                                                    <img src="Google reviews.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display='none'} />
+                                                    <div>
+                                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                                            <img src="google.png" alt="G" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display='none'} />
+                                                            <span className="font-black text-[8.5px] text-gray-900 uppercase tracking-widest">Review us on Google</span>
+                                                        </div>
+                                                        <p className="text-[8px] font-medium text-gray-500 leading-tight">Scan the QR code to share your experience!</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <img src="Map Qr.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display='none'} />
+                                                    <div>
+                                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                                            <img src="googlemap.png" alt="Map" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display='none'} />
+                                                            <span className="font-black text-[8.5px] text-gray-900 uppercase tracking-widest">Find Us on Map</span>
+                                                        </div>
+                                                        <p className="text-[8px] font-medium text-gray-500 leading-tight">Scan the QR code to get directions to our store!</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-8 mt-16">
+                                            <div className="flex-1 border-t border-gray-400 pt-1.5 text-center">
+                                                <span className="font-black text-[8px] text-gray-400 uppercase tracking-widest">Client Signature</span>
+                                            </div>
+                                            <div className="flex-1 border-t border-gray-400 pt-1.5 text-center">
+                                                <span className="font-black text-[8px] text-gray-400 uppercase tracking-widest">Authorized Signature</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="w-[55%] print-w-55 relative flex flex-col justify-end">
+                                        <div className="absolute inset-0 flex items-center justify-center opacity-[0.05] pointer-events-none z-0">
+                                            <img src="Warranty.png" alt="" className="w-full object-contain" onError={(e) => e.target.style.display='none'} />
+                                        </div>
+                                        <div className="relative z-10 flex flex-col gap-4">
+                                            {itemsWithWarranty.length > 0 && (
+                                                <div>
+                                                    <h4 className="font-black text-[9px] uppercase tracking-widest text-gray-400 mb-1.5 block">Warranty Expiry Dates</h4>
+                                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                                        {itemsWithWarranty.map((item, idx) => {
+                                                            return (
+                                                                <div key={idx} className="text-[8px] leading-tight font-medium text-gray-700">
+                                                                    <span className="font-bold text-gray-900 block mb-0.5 text-[8.5px]">ID: {item.displayImei || item["IMEI or Item Code"] || item.originalCode}</span>
+                                                                    <div className="flex flex-col gap-[1px]">
+                                                                        {item.warranty?.software && item.warranty.software !== 'None' && <div><span className="text-gray-500">Software:</span> <span className="font-bold">{item.warranty.softwareEnd || item.warranty.software}</span></div>}
+                                                                        {item.warranty?.global && item.warranty.global !== 'None' && <div><span className="text-gray-500">General:</span> <span className="font-bold">{item.warranty.globalEnd || item.warranty.global}</span></div>}
+                                                                        {item.warranty?.extended && item.warranty.extended !== 'None' && <div><span className="text-gray-500">Ext. Warranty:</span> <span className="font-bold">{item.warranty.extendedEnd || item.warranty.extended}</span></div>}
+                                                                        {item.warranty?.appleCare && item.warranty.appleCare !== 'None' && <div><span className="text-gray-500">Apple Care:</span> <span className="font-bold">{item.warranty.appleCareEnd || item.warranty.appleCare}</span></div>}
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {purchasedItems.length <= 5 && (
+                                                <div className="text-[7.5px] leading-[1.25] text-gray-600 text-justify font-medium">
+                                                    <h4 className="font-black text-[8px] uppercase tracking-widest text-gray-400 mb-1 block">Terms of Sale and Warranty</h4>
+                                                    <ol className="list-decimal pl-3 space-y-[1px] mb-1">
+                                                        <li>Warranty is valid only when the product is used under normal operating conditions.</li>
+                                                        <li>Display, Face ID, and Fingerprint ID issues are not covered under warranty.</li>
+                                                        <li>Physical damage such as cracks, dents, scratches, or signs of impact/dropping are not covered.</li>
+                                                        <li>Liquid or water damage, or any signs of moisture inside the device, are not covered.</li>
+                                                        <li>If the warranty sticker is missing, tampered with, or replaced, the warranty is void.</li>
+                                                        <li>Warranty claims require the device to be in a working (power-on) condition.</li>
+                                                        <li>Claims will not be accepted after the warranty period has expired.</li>
+                                                    </ol>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right mt-3 pt-2 border-t border-gray-200 shrink-0 relative z-10">
+                                    <span className="text-[6.5px] font-black text-gray-400 tracking-widest uppercase">Invoice issued by Hich Web Solutions 0714112113</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const mountNode = document.getElementById('root');
+        if (!mountNode) throw new Error('Root element #root was not found.');
+        if (ReactDOM.createRoot) {
+            ReactDOM.createRoot(mountNode).render(<ErrorBoundary><App /></ErrorBoundary>);
+        } else {
+            ReactDOM.render(<ErrorBoundary><App /></ErrorBoundary>, mountNode);
+        }
+        document.body.classList.add('app-mounted');
+    
+} catch (err) {
+  if (window.__ICON_BOOT_ERROR__) window.__ICON_BOOT_ERROR__(err && (err.stack || err.message) || err);
+  else throw err;
+}
+</script>
+</body>
+</html>
