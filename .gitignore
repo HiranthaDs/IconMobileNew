@@ -7,5 +7,7 @@ __pycache__/
 *.db-wal
 *.db-shm
 _backups/*.db
+_backups/*.json
 _backups/*.tmp
+backend/.erp_session_secret
 .pytest_cache/

@@ -1,7 +1,7 @@
-"""Authentication primitives for the local ICON MOBILE server.
+"""Authentication primitives for the ICON MOBILE backend.
 
-The module deliberately uses only the Python standard library.  Sessions are
-signed, expire on the server, and are carried in an HTTP-only host cookie.
+Ported from the root ``backend_security.py``. Session signing/verification
+logic and the role login credentials are unchanged.
 """
 
 from __future__ import annotations
@@ -14,11 +14,24 @@ import os
 import secrets
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 COOKIE_NAME = "icon_session"
+
+# Same role/password mapping as the root main.py (PASSWORDS dict). Do not
+# change these values here; override via the POS_PASSWORD / ADMIN_PASSWORD /
+# WHOLESALE_PASSWORD environment variables instead.
+PASSWORDS = {
+    "pos": os.environ.get("POS_PASSWORD", "ICONM@2026"),
+    "admin": os.environ.get("ADMIN_PASSWORD", "ADMIN@2026"),
+    "wholesale": os.environ.get("WHOLESALE_PASSWORD", "ADMIN@WS"),
+}
 
 
 def _b64encode(value: bytes) -> str:
@@ -108,7 +121,7 @@ class SessionSigner:
         except (ValueError, TypeError, KeyError, json.JSONDecodeError):
             return None
         now = int(time.time())
-        if role not in {"pos", "admin", "wholesale"}:
+        if role not in PASSWORDS:
             return None
         if issued_at > now + 60 or expires_at <= now or expires_at - issued_at > self.lifetime_seconds + 60:
             return None
@@ -121,3 +134,10 @@ def password_matches(candidate: object, configured: str) -> bool:
     left = str(candidate or "").encode("utf-8")
     right = configured.encode("utf-8")
     return hmac.compare_digest(left, right)
+
+
+@lru_cache(maxsize=1)
+def get_signer() -> SessionSigner:
+    base_dir = Path(__file__).resolve().parents[2]  # backend/
+    lifetime_seconds = int(os.environ.get("SESSION_HOURS", "12")) * 3600
+    return SessionSigner(load_or_create_secret(base_dir), lifetime_seconds)

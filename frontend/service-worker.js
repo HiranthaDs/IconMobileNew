@@ -10,18 +10,18 @@ const SHELL_FILES = [
   "/settings.html",
   "/scanner.html",
   "/B2Binvoice.html",
-  "/assets/app.css",
-  "/assets/local-api.js",
-  "/assets/vendor/react.production.min.js",
-  "/assets/vendor/react-dom.production.min.js",
-  "/assets/vendor/babel.min.js",
-  "/logo.png",
-  "/logo%20watermark.png",
-  "/warranty.png",
-  "/Google%20reviews.png",
-  "/Google.png",
-  "/googlemap.png",
-  "/Map%20Qr.png"
+  "/assets/css/app.css",
+  "/assets/js/local-api.js",
+  "/assets/js/vendor/react.production.min.js",
+  "/assets/js/vendor/react-dom.production.min.js",
+  "/assets/js/vendor/babel.min.js",
+  "/assets/images/logo.png",
+  "/assets/images/logo%20watermark.png",
+  "/assets/images/warranty.png",
+  "/assets/images/Google%20reviews.png",
+  "/assets/images/Google.png",
+  "/assets/images/googlemap.png",
+  "/assets/images/Map%20Qr.png"
 ];
 
 self.addEventListener("install", function (event) {

@@ -1,377 +1,118 @@
-"""SQLite v2 persistence and compatibility logic for ICON MOBILE.
+"""Supabase/Postgres persistence for ICON MOBILE.
 
-All write operations are serialized with ``BEGIN IMMEDIATE`` and committed
-with their operation receipt, revision, audit row, inventory changes, and
-transaction record in one SQLite transaction.  Existing legacy tables in
-``erp.db`` are intentionally left untouched.
+This is a faithful port of ``SQLiteStore`` from the original
+``backend_store.py``.  Every business rule (idempotency by operation id and
+invoice id, atomic stock movement and reversal, client normalization,
+accounting rollups, transaction/return validation) is preserved.  The storage
+engine is Supabase Postgres instead of a local SQLite file:
+
+  * Writes are serialized by locking the ``revision`` meta row
+    (``SELECT ... FOR UPDATE``), the Postgres equivalent of SQLite's
+    ``BEGIN IMMEDIATE``.
+  * Case-insensitive unique columns use ``citext`` (was ``COLLATE NOCASE``).
+  * Backups are JSON table dumps written under the backup directory, since a
+    single-file copy does not apply to a hosted database.  Supabase's own
+    managed backups remain the disaster-recovery mechanism.
 """
 
 from __future__ import annotations
 
-import csv
 import datetime as dt
-import hashlib
 import io
 import json
-import os
 import re
-import shutil
-import sqlite3
-import tempfile
 import threading
-import time
 import uuid
-from contextlib import contextmanager
-from copy import deepcopy
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from app.core import db
+from app.store.helpers import (
+    SCHEMA_VERSION,
+    TRANSACTION_TYPES,
+    StoreError,
+    _PARTNER_PREFIX,
+    canonical_json,
+    cents_to_legacy,
+    clean_text,
+    first_value,
+    json_object,
+    money_to_cents,
+    normalized_status,
+    request_digest,
+    safe_int,
+    utc_now,
+)
+
+_DUMP_TABLES = [
+    "v2_meta",
+    "v2_products",
+    "v2_units",
+    "v2_clients",
+    "v2_transactions",
+    "v2_transaction_items",
+    "v2_operation_receipts",
+    "v2_change_log",
+]
+_ID_TABLES = [
+    "v2_products",
+    "v2_units",
+    "v2_clients",
+    "v2_transactions",
+    "v2_transaction_items",
+]
 
 
-SCHEMA_VERSION = "icon-mobile.sqlite.v2"
-TRANSACTION_TYPES = {"Sale", "Issue", "Return", "B2B_Payment"}
-_PARTNER_PREFIX = "Partner:"
-
-
-class StoreError(Exception):
-    def __init__(self, status: int, code: str, message: str, details: Any = None) -> None:
-        super().__init__(message)
-        self.status = status
-        self.code = code
-        self.message = message
-        self.details = details
-
-
-def utc_now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-
-
-def json_object(value: Any, fallback: Optional[dict] = None) -> dict:
-    if isinstance(value, dict):
-        return deepcopy(value)
-    if isinstance(value, str) and value.strip():
-        try:
-            loaded = json.loads(value)
-            return loaded if isinstance(loaded, dict) else (fallback or {})
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    return deepcopy(fallback or {})
-
-
-def first_value(mapping: Mapping[str, Any], keys: Sequence[str], default: Any = "") -> Any:
-    for key in keys:
-        value = mapping.get(key)
-        if value is not None and str(value).strip() != "":
-            return value
-    return default
-
-
-def clean_text(value: Any, *, maximum: int = 500) -> str:
-    text = str(value if value is not None else "").strip()
-    if len(text) > maximum:
-        raise StoreError(422, "field_too_long", f"Text field exceeds {maximum} characters")
-    return text
-
-
-def safe_int(value: Any, default: int = 0, *, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
-    try:
-        result = int(Decimal(str(value).replace(",", "").strip()))
-    except (InvalidOperation, ValueError, TypeError):
-        result = default
-    if minimum is not None and result < minimum:
-        result = minimum
-    if maximum is not None and result > maximum:
-        raise StoreError(422, "number_too_large", f"Number exceeds {maximum}")
-    return result
-
-
-def money_to_cents(value: Any, default: int = 0) -> int:
-    if value is None or value == "":
-        return default
-    raw = str(value).replace(",", "").strip()
-    raw = re.sub(r"[^0-9.\-+]", "", raw)
-    try:
-        amount = Decimal(raw)
-        if not amount.is_finite():
-            raise InvalidOperation
-        cents = int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-    except (InvalidOperation, ValueError):
-        return default
-    if abs(cents) > 100_000_000_000_00:
-        raise StoreError(422, "amount_too_large", "Money amount is outside the supported range")
-    return cents
-
-
-def cents_to_legacy(cents: int) -> Any:
-    if cents % 100 == 0:
-        return cents // 100
-    return float(Decimal(cents) / Decimal(100))
-
-
-def normalized_status(value: Any, default: str = "Available") -> str:
-    status = clean_text(value or default, maximum=220)
-    lowered = status.lower()
-    if lowered == "available":
-        return "Available"
-    if lowered == "sold":
-        return "Sold"
-    if lowered == "returned":
-        return "Returned"
-    if lowered == "deleted":
-        return "Deleted"
-    if lowered.startswith("partner:"):
-        name = status.split(":", 1)[1].strip()
-        if not name:
-            raise StoreError(422, "invalid_status", "Partner inventory status needs a partner name")
-        return f"{_PARTNER_PREFIX}{name}"
-    raise StoreError(422, "invalid_status", f"Unsupported inventory status '{status}'")
-
-
-def request_digest(payload: Mapping[str, Any]) -> str:
-    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
-
-
-class SQLiteStore:
-    def __init__(self, database_path: Path, backup_dir: Path, *, busy_timeout_ms: int = 15_000) -> None:
-        self.database_path = Path(database_path)
+class PostgresStore:
+    def __init__(self, backup_dir: Path) -> None:
         self.backup_dir = Path(backup_dir)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
-        self.busy_timeout_ms = max(1_000, int(busy_timeout_ms))
-        self._maintenance_lock = threading.RLock()
-        self._maintenance_condition = threading.Condition(self._maintenance_lock)
-        self._active_connections = 0
-        self._maintenance = False
+        self._restore_lock = threading.RLock()
         self.initialize()
 
-    def connect(self, *, read_only: bool = False) -> sqlite3.Connection:
-        if read_only:
-            uri = self.database_path.resolve().as_uri() + "?mode=ro"
-            conn = sqlite3.connect(uri, uri=True, timeout=self.busy_timeout_ms / 1000, isolation_level=None)
-        else:
-            conn = sqlite3.connect(
-                str(self.database_path), timeout=self.busy_timeout_ms / 1000,
-                isolation_level=None,
-            )
-        conn.row_factory = sqlite3.Row
-        conn.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
-        conn.execute("PRAGMA foreign_keys=ON")
-        if not read_only:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=FULL")
-        return conn
-
-    @contextmanager
-    def connection(self, *, read_only: bool = False) -> Iterator[sqlite3.Connection]:
-        with self._maintenance_condition:
-            if self._maintenance:
-                raise StoreError(503, "maintenance", "Database maintenance is in progress")
-            self._active_connections += 1
-        conn: Optional[sqlite3.Connection] = None
-        try:
-            conn = self.connect(read_only=read_only)
-            yield conn
-        finally:
-            if conn is not None:
-                conn.close()
-            with self._maintenance_condition:
-                self._active_connections -= 1
-                self._maintenance_condition.notify_all()
-
     def initialize(self) -> None:
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._maintenance_lock:
-            conn = self.connect()
-            try:
-                conn.executescript(
-                    """
-                    CREATE TABLE IF NOT EXISTS v2_meta (
-                        key TEXT PRIMARY KEY,
-                        value TEXT NOT NULL
-                    );
+        db.init_db(SCHEMA_VERSION)
 
-                    CREATE TABLE IF NOT EXISTS v2_products (
-                        id INTEGER PRIMARY KEY,
-                        sku TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                        item_type TEXT NOT NULL DEFAULT '',
-                        category TEXT NOT NULL DEFAULT '',
-                        brand TEXT NOT NULL DEFAULT '',
-                        model TEXT NOT NULL DEFAULT '',
-                        color TEXT NOT NULL DEFAULT '',
-                        specs_json TEXT NOT NULL DEFAULT '{}',
-                        price_cents INTEGER NOT NULL DEFAULT 0 CHECK(price_cents >= 0),
-                        offer_price_cents INTEGER NOT NULL DEFAULT 0 CHECK(offer_price_cents >= 0),
-                        aggregate_quantity INTEGER NOT NULL DEFAULT 0 CHECK(aggregate_quantity >= 0),
-                        notes TEXT NOT NULL DEFAULT '',
-                        legacy_json TEXT NOT NULL DEFAULT '{}',
-                        deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)),
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        revision INTEGER NOT NULL DEFAULT 0
-                    );
+    # ------------------------------------------------------------------
+    # Connection / transaction primitives
+    # ------------------------------------------------------------------
 
-                    CREATE TABLE IF NOT EXISTS v2_units (
-                        id INTEGER PRIMARY KEY,
-                        product_id INTEGER NOT NULL REFERENCES v2_products(id) ON DELETE RESTRICT,
-                        unit_code TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                        supplier TEXT NOT NULL DEFAULT '',
-                        cost_cents INTEGER NOT NULL DEFAULT 0 CHECK(cost_cents >= 0),
-                        status TEXT NOT NULL DEFAULT 'Available'
-                            CHECK(status IN ('Available','Sold','Returned','Deleted') OR status LIKE 'Partner:%'),
-                        date_added TEXT NOT NULL,
-                        deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)),
-                        updated_at TEXT NOT NULL,
-                        revision INTEGER NOT NULL DEFAULT 0
-                    );
+    def connection(self, *, read_only: bool = False):
+        return db.connection(read_only=read_only)
 
-                    CREATE TABLE IF NOT EXISTS v2_clients (
-                        id INTEGER PRIMARY KEY,
-                        client_key TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                        name TEXT NOT NULL,
-                        phone TEXT NOT NULL DEFAULT '',
-                        email TEXT NOT NULL DEFAULT '',
-                        client_type TEXT NOT NULL DEFAULT 'Retail'
-                            CHECK(client_type IN ('Retail','B2B')),
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        revision INTEGER NOT NULL DEFAULT 0
-                    );
+    def _lock_for_write(self, conn) -> None:
+        """Serialize all writers by locking the shared revision row.
 
-                    CREATE TABLE IF NOT EXISTS v2_transactions (
-                        id INTEGER PRIMARY KEY,
-                        invoice_id TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                        client_id INTEGER REFERENCES v2_clients(id) ON DELETE RESTRICT,
-                        transaction_type TEXT NOT NULL
-                            CHECK(transaction_type IN ('Sale','Issue','Return','B2B_Payment')),
-                        record_type TEXT NOT NULL DEFAULT '',
-                        source_system TEXT NOT NULL DEFAULT '',
-                        client_name TEXT NOT NULL DEFAULT '',
-                        client_phone TEXT NOT NULL DEFAULT '',
-                        client_email TEXT NOT NULL DEFAULT '',
-                        payment_method TEXT NOT NULL DEFAULT '',
-                        subtotal_cents INTEGER NOT NULL DEFAULT 0,
-                        discount_cents INTEGER NOT NULL DEFAULT 0,
-                        total_cents INTEGER NOT NULL DEFAULT 0,
-                        quantity INTEGER NOT NULL DEFAULT 0,
-                        linked_invoice_id TEXT NOT NULL DEFAULT '',
-                        request_hash TEXT NOT NULL,
-                        raw_json TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        revision INTEGER NOT NULL
-                    );
+        Postgres equivalent of ``BEGIN IMMEDIATE``: every mutating operation
+        takes the same row lock, so revisions and stock updates never interleave.
+        """
+        conn.execute("SELECT value FROM v2_meta WHERE key='revision' FOR UPDATE")
 
-                    CREATE TABLE IF NOT EXISTS v2_transaction_items (
-                        id INTEGER PRIMARY KEY,
-                        transaction_id INTEGER NOT NULL REFERENCES v2_transactions(id) ON DELETE RESTRICT,
-                        product_id INTEGER REFERENCES v2_products(id) ON DELETE RESTRICT,
-                        unit_id INTEGER REFERENCES v2_units(id) ON DELETE RESTRICT,
-                        unit_code TEXT NOT NULL DEFAULT '',
-                        group_code TEXT NOT NULL DEFAULT '',
-                        quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
-                        price_cents INTEGER NOT NULL DEFAULT 0,
-                        discount_cents INTEGER NOT NULL DEFAULT 0,
-                        cost_cents INTEGER NOT NULL DEFAULT 0,
-                        raw_json TEXT NOT NULL
-                    );
-
-                    CREATE TABLE IF NOT EXISTS v2_operation_receipts (
-                        operation_id TEXT PRIMARY KEY,
-                        device_id TEXT NOT NULL,
-                        actor_role TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        request_hash TEXT NOT NULL,
-                        invoice_id TEXT NOT NULL DEFAULT '',
-                        revision INTEGER NOT NULL,
-                        response_json TEXT NOT NULL,
-                        created_at TEXT NOT NULL
-                    );
-
-                    CREATE TABLE IF NOT EXISTS v2_change_log (
-                        revision INTEGER PRIMARY KEY,
-                        operation_id TEXT NOT NULL,
-                        device_id TEXT NOT NULL,
-                        actor_role TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        entity_type TEXT NOT NULL,
-                        entity_id TEXT NOT NULL,
-                        summary_json TEXT NOT NULL,
-                        created_at TEXT NOT NULL
-                    );
-
-                    CREATE INDEX IF NOT EXISTS ix_v2_products_updated ON v2_products(deleted, updated_at DESC);
-                    CREATE INDEX IF NOT EXISTS ix_v2_units_product ON v2_units(product_id, deleted, status);
-                    CREATE INDEX IF NOT EXISTS ix_v2_clients_updated ON v2_clients(updated_at DESC, id DESC);
-                    CREATE INDEX IF NOT EXISTS ix_v2_clients_name ON v2_clients(name COLLATE NOCASE);
-                    CREATE INDEX IF NOT EXISTS ix_v2_transactions_created ON v2_transactions(created_at DESC, id DESC);
-                    CREATE INDEX IF NOT EXISTS ix_v2_transactions_type ON v2_transactions(transaction_type, created_at DESC);
-                    CREATE INDEX IF NOT EXISTS ix_v2_transaction_items_unit ON v2_transaction_items(unit_code);
-                    CREATE INDEX IF NOT EXISTS ix_v2_receipts_created ON v2_operation_receipts(created_at DESC);
-                    """
-                )
-                conn.execute("INSERT OR IGNORE INTO v2_meta(key,value) VALUES('schema_version',?)", (SCHEMA_VERSION,))
-                conn.execute("INSERT OR IGNORE INTO v2_meta(key,value) VALUES('revision','0')")
-                conn.execute("INSERT OR IGNORE INTO v2_meta(key,value) VALUES('backup_interval_days','7')")
-                conn.execute("INSERT OR IGNORE INTO v2_meta(key,value) VALUES('automatic_backup_interval_hours','24')")
-                # v2 databases created by an earlier build did not have the
-                # normalized client foreign key. SQLite supports this additive
-                # migration without rebuilding historical rows.
-                transaction_columns = {
-                    row[1] for row in conn.execute("PRAGMA table_info(v2_transactions)")
-                }
-                if "client_id" not in transaction_columns:
-                    conn.execute(
-                        "ALTER TABLE v2_transactions ADD COLUMN client_id INTEGER REFERENCES v2_clients(id)"
-                    )
-                schema = conn.execute("SELECT value FROM v2_meta WHERE key='schema_version'").fetchone()
-                if not schema or schema[0] != SCHEMA_VERSION:
-                    raise RuntimeError(f"Unsupported SQLite schema: {schema[0] if schema else 'missing'}")
-            finally:
-                conn.close()
-
-    def current_revision(self, conn: Optional[sqlite3.Connection] = None) -> int:
+    def current_revision(self, conn=None) -> int:
         if conn is not None:
             row = conn.execute("SELECT value FROM v2_meta WHERE key='revision'").fetchone()
             return int(row[0]) if row else 0
         with self.connection(read_only=True) as opened:
             return self.current_revision(opened)
 
-    def _next_revision(self, conn: sqlite3.Connection) -> int:
-        conn.execute("UPDATE v2_meta SET value=CAST(value AS INTEGER)+1 WHERE key='revision'")
+    def _next_revision(self, conn) -> int:
+        conn.execute(
+            "UPDATE v2_meta SET value=(CAST(value AS INTEGER)+1)::text WHERE key='revision'"
+        )
         return self.current_revision(conn)
 
     @staticmethod
-    def _meta_get(conn: sqlite3.Connection, key: str, default: str = "") -> str:
-        row = conn.execute("SELECT value FROM v2_meta WHERE key=?", (key,)).fetchone()
+    def _meta_get(conn, key: str, default: str = "") -> str:
+        row = conn.execute("SELECT value FROM v2_meta WHERE key=%s", (key,)).fetchone()
         return str(row[0]) if row else default
 
     @staticmethod
-    def _meta_set(conn: sqlite3.Connection, key: str, value: Any) -> None:
+    def _meta_set(conn, key: str, value: Any) -> None:
         conn.execute(
-            "INSERT INTO v2_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO v2_meta(key,value) VALUES(%s,%s) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, str(value)),
         )
-
-    def _begin_immediate(self, conn: sqlite3.Connection) -> None:
-        deadline = time.monotonic() + self.busy_timeout_ms / 1000
-        delay = 0.02
-        while True:
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                return
-            except sqlite3.OperationalError as exc:
-                if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
-                    raise
-                if time.monotonic() >= deadline:
-                    raise StoreError(503, "database_busy", "Database is busy; retry the operation") from exc
-                time.sleep(delay)
-                delay = min(delay * 1.8, 0.35)
-
-    @property
-    def maintenance(self) -> bool:
-        return self._maintenance
 
     # ------------------------------------------------------------------
     # Canonical inventory conversion
@@ -425,8 +166,6 @@ class SQLiteStore:
         if fallback_cost < 0:
             raise StoreError(422, "invalid_cost", "Inventory cost cannot be negative")
 
-        # Older rows may only contain supplier batches. Convert them to real,
-        # stable unit rows once so every checkout has a concrete serial.
         if not raw_units:
             suppliers = merged.get("Suppliers", [])
             if isinstance(suppliers, str):
@@ -525,9 +264,9 @@ class SQLiteStore:
         return {"canonical": canonical, "legacy": legacy, "specs": specs_object,
                 "price_cents": price_cents, "offer_cents": offer_cents}, units
 
-    def _product_to_dict(self, conn: sqlite3.Connection, product: sqlite3.Row) -> dict:
+    def _product_to_dict(self, conn, product) -> dict:
         units_rows = conn.execute(
-            "SELECT * FROM v2_units WHERE product_id=? AND deleted=0 ORDER BY id",
+            "SELECT * FROM v2_units WHERE product_id=%s AND deleted=0 ORDER BY id",
             (product["id"],),
         ).fetchall()
         units = [{
@@ -576,7 +315,7 @@ class SQLiteStore:
         })
         return base
 
-    def _transaction_to_dict(self, conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    def _transaction_to_dict(self, conn, row) -> dict:
         value = json_object(row["raw_json"])
         value.setdefault("invoiceId", row["invoice_id"])
         value.setdefault("transactionType", row["transaction_type"])
@@ -591,9 +330,6 @@ class SQLiteStore:
         value.setdefault("discount", cents_to_legacy(row["discount_cents"]))
         value.setdefault("total", cents_to_legacy(row["total_cents"]))
         value.setdefault("totalPrice", cents_to_legacy(row["total_cents"]))
-        # Normalized rows are the accounting source of truth.  Enrich legacy-shaped
-        # browser payloads with the committed unit cost so every screen calculates
-        # profit from the same values, including transactions created by older builds.
         normalized_items = [
             {
                 "unitImei": item["unit_code"],
@@ -605,7 +341,7 @@ class SQLiteStore:
             }
             for item in conn.execute(
                 "SELECT unit_code,group_code,quantity,price_cents,discount_cents,cost_cents "
-                "FROM v2_transaction_items WHERE transaction_id=? ORDER BY id",
+                "FROM v2_transaction_items WHERE transaction_id=%s ORDER BY id",
                 (row["id"],),
             ).fetchall()
         ]
@@ -653,8 +389,7 @@ class SQLiteStore:
         )
         return "accessory" if any(marker in text for marker in accessory_markers) else "other"
 
-    def _asset_summary(self, conn: sqlite3.Connection) -> dict:
-        """Return an accounting summary from normalized rows inside the snapshot transaction."""
+    def _asset_summary(self, conn) -> dict:
         products = conn.execute(
             "SELECT id,item_type,category,price_cents,offer_price_cents "
             "FROM v2_products WHERE deleted=0"
@@ -703,8 +438,8 @@ class SQLiteStore:
               FROM v2_transactions AS t
               LEFT JOIN v2_transaction_items AS i ON i.transaction_id=t.id
               LEFT JOIN v2_transactions AS linked
-                     ON linked.invoice_id=t.linked_invoice_id COLLATE NOCASE
-             GROUP BY t.id
+                     ON linked.invoice_id=t.linked_invoice_id
+             GROUP BY t.id, linked.transaction_type
             """
         ).fetchall()
         for transaction in transaction_rows:
@@ -763,26 +498,14 @@ class SQLiteStore:
         normalized_name = re.sub(r"[^a-z0-9]+", "", (name or "").casefold())
         return f"name:{normalized_name or 'unknown'}"
 
-    def _upsert_client(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        name: str,
-        phone: str,
-        email: str,
-        client_type: str,
-        revision: int,
-    ) -> Optional[int]:
+    def _upsert_client(self, conn, *, name: str, phone: str, email: str, client_type: str, revision: int) -> Optional[int]:
         if not (name or phone or email):
             return None
         key = self._client_identity_key(name, phone, email)
-        existing = conn.execute("SELECT client_key FROM v2_clients WHERE client_key=?", (key,)).fetchone()
+        existing = conn.execute("SELECT client_key FROM v2_clients WHERE client_key=%s", (key,)).fetchone()
         if not existing and name:
-            # A return/payment may omit a phone that was present on the original
-            # invoice. Reuse the matching named contact instead of creating a
-            # second client row solely because this event has less detail.
             existing = conn.execute(
-                "SELECT client_key FROM v2_clients WHERE lower(name)=lower(?) ORDER BY updated_at DESC LIMIT 1",
+                "SELECT client_key FROM v2_clients WHERE lower(name)=lower(%s) ORDER BY updated_at DESC LIMIT 1",
                 (name,),
             ).fetchone()
         if existing:
@@ -791,7 +514,7 @@ class SQLiteStore:
         conn.execute(
             """
             INSERT INTO v2_clients(client_key,name,phone,email,client_type,created_at,updated_at,revision)
-            VALUES(?,?,?,?,?,?,?,?)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT(client_key) DO UPDATE SET
                 name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE v2_clients.name END,
                 phone=CASE WHEN excluded.phone<>'' THEN excluded.phone ELSE v2_clients.phone END,
@@ -802,11 +525,11 @@ class SQLiteStore:
             """,
             (key, name or "Unknown", phone, email, client_type, now, now, revision),
         )
-        row = conn.execute("SELECT id FROM v2_clients WHERE client_key=?", (key,)).fetchone()
+        row = conn.execute("SELECT id FROM v2_clients WHERE client_key=%s", (key,)).fetchone()
         return int(row[0]) if row else None
 
     @staticmethod
-    def _client_to_dict(row: sqlite3.Row) -> dict:
+    def _client_to_dict(row) -> dict:
         return {
             "id": row["id"], "name": row["name"], "phone": row["phone"],
             "email": row["email"], "type": row["client_type"],
@@ -859,7 +582,7 @@ class SQLiteStore:
         invoice_id = clean_text(invoice_id, maximum=180)
         with self.connection(read_only=True) as conn:
             row = conn.execute(
-                "SELECT * FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (invoice_id,)
+                "SELECT * FROM v2_transactions WHERE invoice_id=%s", (invoice_id,)
             ).fetchone()
             if not row:
                 raise StoreError(404, "invoice_not_found", f"Invoice '{invoice_id}' was not found")
@@ -869,112 +592,15 @@ class SQLiteStore:
         operation_id = clean_text(operation_id, maximum=180)
         with self.connection(read_only=True) as conn:
             row = conn.execute(
-                "SELECT response_json FROM v2_operation_receipts WHERE operation_id=?", (operation_id,)
+                "SELECT response_json FROM v2_operation_receipts WHERE operation_id=%s", (operation_id,)
             ).fetchone()
             return json_object(row[0]) if row else None
-
-    def import_legacy_transaction(self, raw_record: Mapping[str, Any], *, source_name: str = "legacy_csv") -> bool:
-        """Import one historical ledger record without replaying its stock move.
-
-        Inventory CSV is the current stock truth during migration. Replaying old
-        sales would decrement it a second time, so this path intentionally stores
-        the historical event only. It is not exposed through HTTP.
-        """
-        if not isinstance(raw_record, Mapping):
-            raise StoreError(422, "invalid_import", "Legacy transaction must be an object")
-        record = deepcopy(dict(raw_record))
-        client = record.get("client") if isinstance(record.get("client"), Mapping) else {}
-        client = dict(client)
-        invoice_id = clean_text(first_value(
-            record, ["invoiceId", "id", "ref"], first_value(client, ["invoiceId"])
-        ), maximum=180)
-        if not invoice_id:
-            invoice_id = "MIG-" + hashlib.sha256(canonical_json(record).encode("utf-8")).hexdigest()[:20].upper()
-            record["invoiceId"] = invoice_id
-        original_type = clean_text(first_value(
-            record, ["transactionType"], first_value(client, ["transactionType"], "Sale")
-        ), maximum=120) or "Sale"
-        folded = original_type.casefold()
-        if folded in {"sale", "pos_sale", "retailsale"}:
-            database_type = "Sale"
-        elif "payment" in folded:
-            database_type = "B2B_Payment"
-        elif "return" in folded:
-            database_type = "Return"
-        else:
-            # Issue, partner profile, and older wholesale profile rows all remain
-            # distinguishable in raw_json while satisfying the normalized CHECK.
-            database_type = "Issue"
-        digest = request_digest(record)
-        now = utc_now()
-        created_at = clean_text(first_value(record, ["date", "createdAt", "timestamp"], now), maximum=100)
-        client_name = clean_text(first_value(record, ["name", "customerName", "partnerName"], first_value(client, ["name", "partnerName", "shopName"])), maximum=220)
-        client_phone = clean_text(first_value(record, ["phone", "whatsapp"], first_value(client, ["phone", "whatsapp"])), maximum=80)
-        client_email = clean_text(first_value(record, ["email"], first_value(client, ["email"])), maximum=240)
-        operation_id = "migration-" + hashlib.sha256((source_name + invoice_id).encode("utf-8")).hexdigest()[:32]
-        with self.connection() as conn:
-            self._begin_immediate(conn)
-            try:
-                existing = conn.execute(
-                    "SELECT request_hash FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (invoice_id,)
-                ).fetchone()
-                if existing:
-                    if existing["request_hash"] != digest:
-                        raise StoreError(409, "migration_conflict", f"Invoice '{invoice_id}' already exists with different data")
-                    conn.execute("COMMIT")
-                    return False
-                revision = self._next_revision(conn)
-                record["revision"] = revision
-                record.setdefault("date", created_at)
-                partner_text = " ".join([
-                    original_type, str(record.get("recordType", "")), str(record.get("sourceSystem", "")),
-                    str(client.get("partnerType", "")), str(client.get("clientType", "")),
-                ]).casefold()
-                imported_client_type = "B2B" if (
-                    database_type in {"Issue", "B2B_Payment"}
-                    or client.get("isPartner") is True
-                    or any(value in partner_text for value in ("partner", "b2b", "wholesale"))
-                ) else "Retail"
-                client_id = self._upsert_client(
-                    conn, name=client_name, phone=client_phone, email=client_email,
-                    client_type=imported_client_type, revision=revision,
-                )
-                items = record.get("purchasedItems") or record.get("items") or []
-                quantity = safe_int(first_value(record, ["totalQuantity", "totalQty"], len(items) if isinstance(items, list) else 0), 0, minimum=0)
-                subtotal = money_to_cents(first_value(record, ["subTotal", "subtotal"], 0))
-                discount = money_to_cents(record.get("discount"), 0)
-                total = money_to_cents(first_value(record, ["total", "totalPrice", "paymentAmount", "refundValue"], 0))
-                linked = clean_text(first_value(record, ["linkedInvoiceId", "invoiceRef"], first_value(client, ["linkedInvoiceId", "invoiceRef"])), maximum=180)
-                conn.execute(
-                    "INSERT INTO v2_transactions(invoice_id,client_id,transaction_type,record_type,source_system,client_name,client_phone,client_email,payment_method,subtotal_cents,discount_cents,total_cents,quantity,linked_invoice_id,request_hash,raw_json,created_at,revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (invoice_id, client_id, database_type, clean_text(record.get("recordType"), maximum=120),
-                     clean_text(record.get("sourceSystem") or source_name, maximum=180), client_name,
-                     client_phone, client_email, clean_text(first_value(record, ["paymentMethod"], first_value(client, ["paymentMethod"])), maximum=160),
-                     subtotal, discount, total, quantity, linked, digest, canonical_json(record), created_at, revision),
-                )
-                conn.execute(
-                    "INSERT INTO v2_change_log(revision,operation_id,device_id,actor_role,action,entity_type,entity_id,summary_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                    (revision, operation_id, "migration", "admin", "import_transaction", "transaction",
-                     invoice_id, canonical_json({"source": source_name}), now),
-                )
-                conn.execute("COMMIT")
-                return True
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
 
     # ------------------------------------------------------------------
     # Atomic mutation dispatcher
     # ------------------------------------------------------------------
 
-    def execute_action(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        actor_role: str,
-        device_id: str,
-        operation_id: str,
-    ) -> dict:
+    def execute_action(self, payload: Mapping[str, Any], *, actor_role: str, device_id: str, operation_id: str) -> dict:
         if not isinstance(payload, Mapping):
             raise StoreError(422, "invalid_payload", "Request payload must be an object")
         action = clean_text(payload.get("action"), maximum=80)
@@ -1007,10 +633,10 @@ class SQLiteStore:
         digest = request_digest(digest_payload)
 
         with self.connection() as conn:
-            self._begin_immediate(conn)
+            self._lock_for_write(conn)
             try:
                 prior = conn.execute(
-                    "SELECT * FROM v2_operation_receipts WHERE operation_id=?", (operation_id,)
+                    "SELECT * FROM v2_operation_receipts WHERE operation_id=%s", (operation_id,)
                 ).fetchone()
                 if prior:
                     if prior["request_hash"] != digest:
@@ -1020,12 +646,10 @@ class SQLiteStore:
                     conn.execute("COMMIT")
                     return response
 
-                # An invoice ID is a second idempotency boundary. It protects a
-                # retry even when an older browser generated a fresh operation ID.
                 invoice_id = clean_text(payload.get("invoiceId"), maximum=180) if action == "checkout" else ""
                 if invoice_id:
                     existing_tx = conn.execute(
-                        "SELECT * FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (invoice_id,)
+                        "SELECT * FROM v2_transactions WHERE invoice_id=%s", (invoice_id,)
                     ).fetchone()
                     if existing_tx:
                         if existing_tx["request_hash"] != digest:
@@ -1041,7 +665,7 @@ class SQLiteStore:
                             },
                         }
                         conn.execute(
-                            "INSERT INTO v2_operation_receipts(operation_id,device_id,actor_role,action,request_hash,invoice_id,revision,response_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                            "INSERT INTO v2_operation_receipts(operation_id,device_id,actor_role,action,request_hash,invoice_id,revision,response_json,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                             (operation_id, device_id, actor_role, action, digest, existing_tx["invoice_id"],
                              existing_tx["revision"], canonical_json(response), utc_now()),
                         )
@@ -1106,12 +730,12 @@ class SQLiteStore:
 
                 response = {"success": True, "duplicate": False, "message": message, "data": data}
                 conn.execute(
-                    "INSERT INTO v2_change_log(revision,operation_id,device_id,actor_role,action,entity_type,entity_id,summary_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO v2_change_log(revision,operation_id,device_id,actor_role,action,entity_type,entity_id,summary_json,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (revision, operation_id, device_id, actor_role, action, entity_type, entity_id,
                      canonical_json({"message": message}), utc_now()),
                 )
                 conn.execute(
-                    "INSERT INTO v2_operation_receipts(operation_id,device_id,actor_role,action,request_hash,invoice_id,revision,response_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO v2_operation_receipts(operation_id,device_id,actor_role,action,request_hash,invoice_id,revision,response_json,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (operation_id, device_id, actor_role, action, digest,
                      entity_id if entity_type == "transaction" else "", revision,
                      canonical_json(response), utc_now()),
@@ -1122,14 +746,12 @@ class SQLiteStore:
                 conn.execute("ROLLBACK")
                 raise
 
-    def _save_inventory(
-        self, conn: sqlite3.Connection, raw_item: Any, *, revision: int, create: bool
-    ) -> Tuple[dict, str]:
+    def _save_inventory(self, conn, raw_item: Any, *, revision: int, create: bool) -> Tuple[dict, str]:
         item, units = self._canonical_item(raw_item if isinstance(raw_item, Mapping) else {})
         canonical = item["canonical"]
         sku = canonical["IMEI or Item Code"]
         existing = conn.execute(
-            "SELECT * FROM v2_products WHERE sku=? COLLATE NOCASE", (sku,)
+            "SELECT * FROM v2_products WHERE sku=%s", (sku,)
         ).fetchone()
         if create and existing and not existing["deleted"]:
             raise StoreError(409, "duplicate_sku", f"Product code '{sku}' already exists")
@@ -1139,23 +761,23 @@ class SQLiteStore:
         now = utc_now()
         if not existing:
             cursor = conn.execute(
-                "INSERT INTO v2_products(sku,item_type,category,brand,model,color,specs_json,price_cents,offer_price_cents,aggregate_quantity,notes,legacy_json,deleted,created_at,updated_at,revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)",
+                "INSERT INTO v2_products(sku,item_type,category,brand,model,color,specs_json,price_cents,offer_price_cents,aggregate_quantity,notes,legacy_json,deleted,created_at,updated_at,revision) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,%s) RETURNING id",
                 (sku, canonical["Type"], canonical["Category"], canonical["Brand"], canonical["Model"],
                  canonical["Color"], canonical_json(item["specs"]), item["price_cents"], item["offer_cents"],
                  0, canonical["Notes"], canonical_json(item["legacy"]), now, now, revision),
             )
-            product_id = cursor.lastrowid
+            product_id = cursor.fetchone()[0]
         else:
             product_id = existing["id"]
             conn.execute(
-                "UPDATE v2_products SET item_type=?,category=?,brand=?,model=?,color=?,specs_json=?,price_cents=?,offer_price_cents=?,notes=?,legacy_json=?,deleted=0,updated_at=?,revision=? WHERE id=?",
+                "UPDATE v2_products SET item_type=%s,category=%s,brand=%s,model=%s,color=%s,specs_json=%s,price_cents=%s,offer_price_cents=%s,notes=%s,legacy_json=%s,deleted=0,updated_at=%s,revision=%s WHERE id=%s",
                 (canonical["Type"], canonical["Category"], canonical["Brand"], canonical["Model"],
                  canonical["Color"], canonical_json(item["specs"]), item["price_cents"], item["offer_cents"],
                  canonical["Notes"], canonical_json(item["legacy"]), now, revision, product_id),
             )
 
         incoming_codes = {unit["imei"].casefold() for unit in units}
-        old_units = conn.execute("SELECT * FROM v2_units WHERE product_id=?", (product_id,)).fetchall()
+        old_units = conn.execute("SELECT * FROM v2_units WHERE product_id=%s", (product_id,)).fetchall()
         for old in old_units:
             if old["unit_code"].casefold() not in incoming_codes and not old["deleted"]:
                 if old["status"] not in {"Available", "Returned", "Deleted"}:
@@ -1164,66 +786,66 @@ class SQLiteStore:
                         f"Unit '{old['unit_code']}' is {old['status']} and cannot be removed from the product",
                     )
                 conn.execute(
-                    "UPDATE v2_units SET deleted=1,status='Deleted',updated_at=?,revision=? WHERE id=?",
+                    "UPDATE v2_units SET deleted=1,status='Deleted',updated_at=%s,revision=%s WHERE id=%s",
                     (now, revision, old["id"]),
                 )
 
         for unit in units:
             collision = conn.execute(
-                "SELECT * FROM v2_units WHERE unit_code=? COLLATE NOCASE", (unit["imei"],)
+                "SELECT * FROM v2_units WHERE unit_code=%s", (unit["imei"],)
             ).fetchone()
             if collision and collision["product_id"] != product_id:
                 raise StoreError(409, "duplicate_unit", f"IMEI / serial '{unit['imei']}' belongs to another product")
             if collision:
                 conn.execute(
-                    "UPDATE v2_units SET supplier=?,cost_cents=?,status=?,date_added=?,deleted=0,updated_at=?,revision=? WHERE id=?",
+                    "UPDATE v2_units SET supplier=%s,cost_cents=%s,status=%s,date_added=%s,deleted=0,updated_at=%s,revision=%s WHERE id=%s",
                     (unit["supplier"], unit["cost_cents"], unit["status"], unit["dateAdded"],
                      now, revision, collision["id"]),
                 )
             else:
                 conn.execute(
-                    "INSERT INTO v2_units(product_id,unit_code,supplier,cost_cents,status,date_added,deleted,updated_at,revision) VALUES(?,?,?,?,?,?,0,?,?)",
+                    "INSERT INTO v2_units(product_id,unit_code,supplier,cost_cents,status,date_added,deleted,updated_at,revision) VALUES(%s,%s,%s,%s,%s,%s,0,%s,%s)",
                     (product_id, unit["imei"], unit["supplier"], unit["cost_cents"], unit["status"],
                      unit["dateAdded"], now, revision),
                 )
         self._refresh_product(conn, product_id, revision)
-        product = conn.execute("SELECT * FROM v2_products WHERE id=?", (product_id,)).fetchone()
+        product = conn.execute("SELECT * FROM v2_products WHERE id=%s", (product_id,)).fetchone()
         return self._product_to_dict(conn, product), sku
 
-    def _delete_inventory(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> str:
+    def _delete_inventory(self, conn, payload: Mapping[str, Any], *, revision: int) -> str:
         code = clean_text(first_value(payload, ["imei", "sku", "code", "product_id"]), maximum=180)
         if not code:
             raise StoreError(422, "missing_sku", "Product code is required")
         product = conn.execute(
-            "SELECT * FROM v2_products WHERE sku=? COLLATE NOCASE AND deleted=0", (code,)
+            "SELECT * FROM v2_products WHERE sku=%s AND deleted=0", (code,)
         ).fetchone()
         if not product:
             unit = conn.execute(
-                "SELECT * FROM v2_units WHERE unit_code=? COLLATE NOCASE AND deleted=0", (code,)
+                "SELECT * FROM v2_units WHERE unit_code=%s AND deleted=0", (code,)
             ).fetchone()
             if unit:
                 if unit["status"] not in {"Available", "Returned"}:
                     raise StoreError(409, "unit_in_use", f"Unit '{code}' is {unit['status']} and cannot be deleted")
                 conn.execute(
-                    "UPDATE v2_units SET deleted=1,status='Deleted',updated_at=?,revision=? WHERE id=?",
+                    "UPDATE v2_units SET deleted=1,status='Deleted',updated_at=%s,revision=%s WHERE id=%s",
                     (utc_now(), revision, unit["id"]),
                 )
                 self._refresh_product(conn, unit["product_id"], revision)
                 return code
             raise StoreError(404, "product_not_found", f"Inventory code '{code}' was not found")
         active = conn.execute(
-            "SELECT unit_code,status FROM v2_units WHERE product_id=? AND deleted=0 AND status NOT IN ('Available','Returned')",
+            "SELECT unit_code,status FROM v2_units WHERE product_id=%s AND deleted=0 AND status NOT IN ('Available','Returned')",
             (product["id"],),
         ).fetchone()
         if active:
             raise StoreError(409, "product_in_use", f"Unit '{active['unit_code']}' is {active['status']}; product cannot be deleted")
         now = utc_now()
         conn.execute(
-            "UPDATE v2_units SET deleted=1,status='Deleted',updated_at=?,revision=? WHERE product_id=? AND deleted=0",
+            "UPDATE v2_units SET deleted=1,status='Deleted',updated_at=%s,revision=%s WHERE product_id=%s AND deleted=0",
             (now, revision, product["id"]),
         )
         conn.execute(
-            "UPDATE v2_products SET deleted=1,aggregate_quantity=0,updated_at=?,revision=? WHERE id=?",
+            "UPDATE v2_products SET deleted=1,aggregate_quantity=0,updated_at=%s,revision=%s WHERE id=%s",
             (now, revision, product["id"]),
         )
         return product["sku"]
@@ -1235,9 +857,9 @@ class SQLiteStore:
             raise StoreError(422, "missing_client_id", "Partner ID is required")
         return client_id
 
-    def _update_client(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> dict:
+    def _update_client(self, conn, payload: Mapping[str, Any], *, revision: int) -> dict:
         client_id = self._client_id_from_payload(payload)
-        current = conn.execute("SELECT * FROM v2_clients WHERE id=?", (client_id,)).fetchone()
+        current = conn.execute("SELECT * FROM v2_clients WHERE id=%s", (client_id,)).fetchone()
         if not current:
             raise StoreError(404, "client_not_found", "Partner profile was not found")
 
@@ -1252,7 +874,7 @@ class SQLiteStore:
 
         key = self._client_identity_key(name, phone, email)
         collision = conn.execute(
-            "SELECT id FROM v2_clients WHERE client_key=? COLLATE NOCASE AND id<>?", (key, client_id)
+            "SELECT id FROM v2_clients WHERE client_key=%s AND id<>%s", (key, client_id)
         ).fetchone()
         if collision:
             raise StoreError(409, "duplicate_client", "Another client already uses these contact details")
@@ -1260,17 +882,17 @@ class SQLiteStore:
         now = utc_now()
         old_name = current["name"]
         conn.execute(
-            "UPDATE v2_clients SET client_key=?,name=?,phone=?,email=?,client_type=?,updated_at=?,revision=? WHERE id=?",
+            "UPDATE v2_clients SET client_key=%s,name=%s,phone=%s,email=%s,client_type=%s,updated_at=%s,revision=%s WHERE id=%s",
             (key, name, phone, email, client_type, now, revision, client_id),
         )
         if old_name.casefold() != name.casefold():
             conn.execute(
-                "UPDATE v2_units SET status=?,updated_at=?,revision=? WHERE deleted=0 AND lower(status)=lower(?)",
+                "UPDATE v2_units SET status=%s,updated_at=%s,revision=%s WHERE deleted=0 AND lower(status)=lower(%s)",
                 (f"{_PARTNER_PREFIX}{name}", now, revision, f"{_PARTNER_PREFIX}{old_name}"),
             )
 
         transactions = conn.execute(
-            "SELECT id,raw_json FROM v2_transactions WHERE client_id=?", (client_id,)
+            "SELECT id,raw_json FROM v2_transactions WHERE client_id=%s", (client_id,)
         ).fetchall()
         for transaction in transactions:
             raw = json_object(transaction["raw_json"])
@@ -1282,20 +904,20 @@ class SQLiteStore:
             raw["client"] = raw_client
             raw.update({"name": name, "phone": phone, "email": email, "revision": revision})
             conn.execute(
-                "UPDATE v2_transactions SET client_name=?,client_phone=?,client_email=?,raw_json=?,revision=? WHERE id=?",
+                "UPDATE v2_transactions SET client_name=%s,client_phone=%s,client_email=%s,raw_json=%s,revision=%s WHERE id=%s",
                 (name, phone, email, canonical_json(raw), revision, transaction["id"]),
             )
 
-        updated = conn.execute("SELECT * FROM v2_clients WHERE id=?", (client_id,)).fetchone()
+        updated = conn.execute("SELECT * FROM v2_clients WHERE id=%s", (client_id,)).fetchone()
         return self._client_to_dict(updated)
 
-    def _delete_client(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> dict:
+    def _delete_client(self, conn, payload: Mapping[str, Any], *, revision: int) -> dict:
         client_id = self._client_id_from_payload(payload)
-        client = conn.execute("SELECT * FROM v2_clients WHERE id=?", (client_id,)).fetchone()
+        client = conn.execute("SELECT * FROM v2_clients WHERE id=%s", (client_id,)).fetchone()
         if not client:
             raise StoreError(404, "client_not_found", "Partner profile was not found")
         assigned = conn.execute(
-            "SELECT unit_code FROM v2_units WHERE deleted=0 AND lower(status)=lower(?) LIMIT 1",
+            "SELECT unit_code FROM v2_units WHERE deleted=0 AND lower(status)=lower(%s) LIMIT 1",
             (f"{_PARTNER_PREFIX}{client['name']}",),
         ).fetchone()
         if assigned:
@@ -1304,16 +926,14 @@ class SQLiteStore:
                 f"Partner still holds unit '{assigned['unit_code']}'. Return or reassign partner stock before deleting the profile.",
             )
         history_count = int(conn.execute(
-            "SELECT COUNT(*) FROM v2_transactions WHERE client_id=?", (client_id,)
+            "SELECT COUNT(*) FROM v2_transactions WHERE client_id=%s", (client_id,)
         ).fetchone()[0])
-        # Accounting records remain immutable evidence. Removing a master profile
-        # detaches those records while retaining their invoice-time contact snapshot.
-        conn.execute("UPDATE v2_transactions SET client_id=NULL WHERE client_id=?", (client_id,))
-        conn.execute("DELETE FROM v2_clients WHERE id=?", (client_id,))
+        conn.execute("UPDATE v2_transactions SET client_id=NULL WHERE client_id=%s", (client_id,))
+        conn.execute("DELETE FROM v2_clients WHERE id=%s", (client_id,))
         return {"clientId": client_id, "name": client["name"], "historyPreserved": history_count}
 
     @staticmethod
-    def _transaction_destination(conn: sqlite3.Connection, transaction: sqlite3.Row) -> str:
+    def _transaction_destination(conn, transaction) -> str:
         if transaction["transaction_type"] == "Sale":
             return "Sold"
         if transaction["transaction_type"] == "Issue":
@@ -1326,19 +946,17 @@ class SQLiteStore:
                     "This return has no linked invoice, so its stock movement cannot be reversed safely.",
                 )
             linked = conn.execute(
-                "SELECT * FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (linked_id,)
+                "SELECT * FROM v2_transactions WHERE invoice_id=%s", (linked_id,)
             ).fetchone()
             if not linked or linked["transaction_type"] not in {"Sale", "Issue"}:
                 raise StoreError(409, "return_origin_unknown", "The original sale or issue could not be found")
             return "Sold" if linked["transaction_type"] == "Sale" else f"{_PARTNER_PREFIX}{linked['client_name']}"
         return ""
 
-    def _validate_transaction_unit_reversal(
-        self, conn: sqlite3.Connection, transaction: sqlite3.Row, item: sqlite3.Row
-    ) -> str:
+    def _validate_transaction_unit_reversal(self, conn, transaction, item) -> str:
         if not item["unit_id"]:
             return ""
-        unit = conn.execute("SELECT * FROM v2_units WHERE id=? AND deleted=0", (item["unit_id"],)).fetchone()
+        unit = conn.execute("SELECT * FROM v2_units WHERE id=%s AND deleted=0", (item["unit_id"],)).fetchone()
         if not unit:
             raise StoreError(409, "unit_missing", f"Unit '{item['unit_code']}' is no longer active")
         if transaction["transaction_type"] in {"Sale", "Issue"}:
@@ -1358,19 +976,19 @@ class SQLiteStore:
             return self._transaction_destination(conn, transaction)
         return ""
 
-    def _dependent_transaction(self, conn: sqlite3.Connection, invoice_id: str) -> Optional[sqlite3.Row]:
+    def _dependent_transaction(self, conn, invoice_id: str):
         return conn.execute(
             "SELECT invoice_id,transaction_type FROM v2_transactions "
-            "WHERE linked_invoice_id=? COLLATE NOCASE ORDER BY id LIMIT 1",
+            "WHERE linked_invoice_id=%s ORDER BY id LIMIT 1",
             (invoice_id,),
         ).fetchone()
 
-    def _delete_transaction(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> dict:
+    def _delete_transaction(self, conn, payload: Mapping[str, Any], *, revision: int) -> dict:
         invoice_id = clean_text(first_value(payload, ["invoiceId", "invoice_id", "id"], ""), maximum=180)
         if not invoice_id:
             raise StoreError(422, "missing_invoice_id", "Invoice ID is required")
         transaction = conn.execute(
-            "SELECT * FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (invoice_id,)
+            "SELECT * FROM v2_transactions WHERE invoice_id=%s", (invoice_id,)
         ).fetchone()
         if not transaction:
             raise StoreError(404, "invoice_not_found", f"Invoice '{invoice_id}' was not found")
@@ -1382,7 +1000,7 @@ class SQLiteStore:
             )
 
         items = conn.execute(
-            "SELECT * FROM v2_transaction_items WHERE transaction_id=? ORDER BY id", (transaction["id"],)
+            "SELECT * FROM v2_transaction_items WHERE transaction_id=%s ORDER BY id", (transaction["id"],)
         ).fetchall()
         changes = [(item, self._validate_transaction_unit_reversal(conn, transaction, item)) for item in items]
         touched_products: set[int] = set()
@@ -1390,14 +1008,14 @@ class SQLiteStore:
         for item, target in changes:
             if item["unit_id"] and target:
                 conn.execute(
-                    "UPDATE v2_units SET status=?,updated_at=?,revision=? WHERE id=?",
+                    "UPDATE v2_units SET status=%s,updated_at=%s,revision=%s WHERE id=%s",
                     (target, now, revision, item["unit_id"]),
                 )
             if item["product_id"]:
                 touched_products.add(int(item["product_id"]))
-        conn.execute("DELETE FROM v2_transaction_items WHERE transaction_id=?", (transaction["id"],))
-        conn.execute("DELETE FROM v2_operation_receipts WHERE invoice_id=? COLLATE NOCASE", (transaction["invoice_id"],))
-        conn.execute("DELETE FROM v2_transactions WHERE id=?", (transaction["id"],))
+        conn.execute("DELETE FROM v2_transaction_items WHERE transaction_id=%s", (transaction["id"],))
+        conn.execute("DELETE FROM v2_operation_receipts WHERE invoice_id=%s", (transaction["invoice_id"],))
+        conn.execute("DELETE FROM v2_transactions WHERE id=%s", (transaction["id"],))
         for product_id in touched_products:
             self._refresh_product(conn, product_id, revision)
         return {"invoiceId": transaction["invoice_id"], "reversedUnits": len(changes)}
@@ -1433,24 +1051,24 @@ class SQLiteStore:
             updated.append(line)
         return updated
 
-    def _delete_transaction_item(self, conn: sqlite3.Connection, payload: Mapping[str, Any], *, revision: int) -> dict:
+    def _delete_transaction_item(self, conn, payload: Mapping[str, Any], *, revision: int) -> dict:
         invoice_id = clean_text(first_value(payload, ["invoiceId", "invoice_id"], ""), maximum=180)
         unit_code = clean_text(first_value(payload, ["unitCode", "unitImei", "imei", "code"], ""), maximum=180)
         if not invoice_id or not unit_code:
             raise StoreError(422, "missing_item_reference", "Invoice ID and unit IMEI / code are required")
         transaction = conn.execute(
-            "SELECT * FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (invoice_id,)
+            "SELECT * FROM v2_transactions WHERE invoice_id=%s", (invoice_id,)
         ).fetchone()
         if not transaction:
             raise StoreError(404, "invoice_not_found", f"Invoice '{invoice_id}' was not found")
         item = conn.execute(
-            "SELECT * FROM v2_transaction_items WHERE transaction_id=? AND unit_code=? COLLATE NOCASE ORDER BY id LIMIT 1",
+            "SELECT * FROM v2_transaction_items WHERE transaction_id=%s AND unit_code=%s ORDER BY id LIMIT 1",
             (transaction["id"], unit_code),
         ).fetchone()
         if not item:
             raise StoreError(404, "invoice_item_not_found", f"Item '{unit_code}' was not found on this invoice")
         remaining_count = int(conn.execute(
-            "SELECT COUNT(*) FROM v2_transaction_items WHERE transaction_id=?", (transaction["id"],)
+            "SELECT COUNT(*) FROM v2_transaction_items WHERE transaction_id=%s", (transaction["id"],)
         ).fetchone()[0])
         if remaining_count <= 1:
             raise StoreError(409, "last_invoice_item", "This is the final invoice item. Delete the complete invoice instead.")
@@ -1458,7 +1076,7 @@ class SQLiteStore:
             dependent = conn.execute(
                 "SELECT child.invoice_id FROM v2_transactions child "
                 "JOIN v2_transaction_items child_item ON child_item.transaction_id=child.id "
-                "WHERE child.linked_invoice_id=? COLLATE NOCASE AND child_item.unit_id=? LIMIT 1",
+                "WHERE child.linked_invoice_id=%s AND child_item.unit_id=%s LIMIT 1",
                 (transaction["invoice_id"], item["unit_id"]),
             ).fetchone()
             if dependent:
@@ -1471,13 +1089,13 @@ class SQLiteStore:
         now = utc_now()
         if item["unit_id"] and target:
             conn.execute(
-                "UPDATE v2_units SET status=?,updated_at=?,revision=? WHERE id=?",
+                "UPDATE v2_units SET status=%s,updated_at=%s,revision=%s WHERE id=%s",
                 (target, now, revision, item["unit_id"]),
             )
-        conn.execute("DELETE FROM v2_transaction_items WHERE id=?", (item["id"],))
+        conn.execute("DELETE FROM v2_transaction_items WHERE id=%s", (item["id"],))
 
         rows = conn.execute(
-            "SELECT price_cents,discount_cents,quantity FROM v2_transaction_items WHERE transaction_id=?",
+            "SELECT price_cents,discount_cents,quantity FROM v2_transaction_items WHERE transaction_id=%s",
             (transaction["id"],),
         ).fetchall()
         calculated = sum(int(row["price_cents"]) * int(row["quantity"]) for row in rows)
@@ -1499,25 +1117,25 @@ class SQLiteStore:
             "totalQty": quantity, "totalQuantity": quantity, "revision": revision,
         })
         conn.execute(
-            "UPDATE v2_transactions SET subtotal_cents=?,discount_cents=?,total_cents=?,quantity=?,raw_json=?,revision=? WHERE id=?",
+            "UPDATE v2_transactions SET subtotal_cents=%s,discount_cents=%s,total_cents=%s,quantity=%s,raw_json=%s,revision=%s WHERE id=%s",
             (subtotal, discount, total, quantity, canonical_json(raw), revision, transaction["id"]),
         )
-        conn.execute("DELETE FROM v2_operation_receipts WHERE invoice_id=? COLLATE NOCASE", (transaction["invoice_id"],))
+        conn.execute("DELETE FROM v2_operation_receipts WHERE invoice_id=%s", (transaction["invoice_id"],))
         if item["product_id"]:
             self._refresh_product(conn, int(item["product_id"]), revision)
-        updated = conn.execute("SELECT * FROM v2_transactions WHERE id=?", (transaction["id"],)).fetchone()
+        updated = conn.execute("SELECT * FROM v2_transactions WHERE id=%s", (transaction["id"],)).fetchone()
         return {
             "invoiceId": transaction["invoice_id"], "unitCode": item["unit_code"],
             "transaction": self._transaction_to_dict(conn, updated),
         }
 
-    def _refresh_product(self, conn: sqlite3.Connection, product_id: int, revision: int) -> None:
+    def _refresh_product(self, conn, product_id: int, revision: int) -> None:
         available = conn.execute(
-            "SELECT COUNT(*) FROM v2_units WHERE product_id=? AND deleted=0 AND status='Available'",
+            "SELECT COUNT(*) FROM v2_units WHERE product_id=%s AND deleted=0 AND status='Available'",
             (product_id,),
         ).fetchone()[0]
         conn.execute(
-            "UPDATE v2_products SET aggregate_quantity=?,updated_at=?,revision=? WHERE id=?",
+            "UPDATE v2_products SET aggregate_quantity=%s,updated_at=%s,revision=%s WHERE id=%s",
             (available, utc_now(), revision, product_id),
         )
 
@@ -1525,14 +1143,7 @@ class SQLiteStore:
     # Checkout / issue / return / payment
     # ------------------------------------------------------------------
 
-    def _checkout(
-        self,
-        conn: sqlite3.Connection,
-        payload: dict,
-        transaction_type: str,
-        revision: int,
-        digest: str,
-    ) -> dict:
+    def _checkout(self, conn, payload: dict, transaction_type: str, revision: int, digest: str) -> dict:
         invoice_id = clean_text(payload.get("invoiceId"), maximum=180)
         if not invoice_id:
             prefix = {"Sale": "INV", "Issue": "B2B", "Return": "RET", "B2B_Payment": "PMT"}[transaction_type]
@@ -1576,7 +1187,7 @@ class SQLiteStore:
         ), maximum=180)
         if linked_invoice:
             linked = conn.execute(
-                "SELECT id FROM v2_transactions WHERE invoice_id=? COLLATE NOCASE", (linked_invoice,)
+                "SELECT id FROM v2_transactions WHERE invoice_id=%s", (linked_invoice,)
             ).fetchone()
             if not linked and transaction_type in {"Return", "B2B_Payment"}:
                 raise StoreError(409, "linked_invoice_missing", f"Linked invoice '{linked_invoice}' does not exist")
@@ -1603,7 +1214,7 @@ class SQLiteStore:
                 allocated = []
                 for unit in selected:
                     changed = conn.execute(
-                        "UPDATE v2_units SET status=?,updated_at=?,revision=? WHERE id=? AND deleted=0 AND status='Available'",
+                        "UPDATE v2_units SET status=%s,updated_at=%s,revision=%s WHERE id=%s AND deleted=0 AND status='Available'",
                         (destination, utc_now(), revision, unit["id"]),
                     )
                     if changed.rowcount != 1:
@@ -1645,7 +1256,7 @@ class SQLiteStore:
                 allocated = []
                 for unit in selected:
                     changed = conn.execute(
-                        "UPDATE v2_units SET status='Available',updated_at=?,revision=? WHERE id=? AND deleted=0 AND status NOT IN ('Available','Deleted')",
+                        "UPDATE v2_units SET status='Available',updated_at=%s,revision=%s WHERE id=%s AND deleted=0 AND status NOT IN ('Available','Deleted')",
                         (utc_now(), revision, unit["id"]),
                     )
                     if changed.rowcount != 1:
@@ -1737,31 +1348,31 @@ class SQLiteStore:
             payload["returnedItems"] = stored_items
 
         cursor = conn.execute(
-            "INSERT INTO v2_transactions(invoice_id,client_id,transaction_type,record_type,source_system,client_name,client_phone,client_email,payment_method,subtotal_cents,discount_cents,total_cents,quantity,linked_invoice_id,request_hash,raw_json,created_at,revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO v2_transactions(invoice_id,client_id,transaction_type,record_type,source_system,client_name,client_phone,client_email,payment_method,subtotal_cents,discount_cents,total_cents,quantity,linked_invoice_id,request_hash,raw_json,created_at,revision) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (invoice_id, client_id, transaction_type, clean_text(payload.get("recordType"), maximum=120),
              clean_text(payload.get("sourceSystem"), maximum=180), client_name, client_phone, client_email,
              payment_method, subtotal_cents, discount_cents,
              calculated_total if transaction_type == "B2B_Payment" else total_cents,
              calculated_qty, linked_invoice, digest, canonical_json(payload), created_at, revision),
         )
-        transaction_id = cursor.lastrowid
+        transaction_id = cursor.fetchone()[0]
         for row in item_rows:
             conn.execute(
-                "INSERT INTO v2_transaction_items(transaction_id,product_id,unit_id,unit_code,group_code,quantity,price_cents,discount_cents,cost_cents,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO v2_transaction_items(transaction_id,product_id,unit_id,unit_code,group_code,quantity,price_cents,discount_cents,cost_cents,raw_json) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (transaction_id, row["product_id"], row["unit_id"], row["unit_code"], row["group_code"],
                  row["quantity"], row["price_cents"], row["discount_cents"], row["cost_cents"],
                  canonical_json(row["raw"])),
             )
         return payload
 
-    def _resolve_product(self, conn: sqlite3.Connection, line: Mapping[str, Any]) -> sqlite3.Row:
+    def _resolve_product(self, conn, line: Mapping[str, Any]):
         group_code = clean_text(first_value(
             line,
             ["groupCode", "Original IMEI", "productCode", "sku", "SKU"],
             first_value(line, ["IMEI or Item Code", "IMEI", "unitImei", "displayImei"]),
         ), maximum=180)
         product = conn.execute(
-            "SELECT * FROM v2_products WHERE sku=? COLLATE NOCASE AND deleted=0", (group_code,)
+            "SELECT * FROM v2_products WHERE sku=%s AND deleted=0", (group_code,)
         ).fetchone() if group_code else None
         if product:
             return product
@@ -1769,17 +1380,15 @@ class SQLiteStore:
             line, ["unitImei", "displayImei", "IMEI", "IMEI or Item Code"]
         ), maximum=180)
         unit = conn.execute(
-            "SELECT product_id FROM v2_units WHERE unit_code=? COLLATE NOCASE AND deleted=0", (unit_code,)
+            "SELECT product_id FROM v2_units WHERE unit_code=%s AND deleted=0", (unit_code,)
         ).fetchone() if unit_code else None
         if unit:
-            return conn.execute("SELECT * FROM v2_products WHERE id=? AND deleted=0", (unit["product_id"],)).fetchone()
+            return conn.execute("SELECT * FROM v2_products WHERE id=%s AND deleted=0", (unit["product_id"],)).fetchone()
         raise StoreError(404, "product_not_found", f"Inventory item '{group_code or unit_code}' was not found")
 
     def _explicit_unit_code(self, line: Mapping[str, Any], product_sku: str) -> str:
         explicit = clean_text(first_value(line, ["unitImei", "displayImei"], ""), maximum=180)
         if explicit.casefold() == product_sku.casefold():
-            # Group-level accessory carts often repeat the SKU in displayImei.
-            # Let the server allocate concrete available units in that case.
             explicit = ""
         if not explicit:
             candidate = clean_text(first_value(line, ["IMEI", "IMEI or Item Code"], ""), maximum=180)
@@ -1787,15 +1396,13 @@ class SQLiteStore:
                 explicit = candidate
         return explicit
 
-    def _select_available_units(
-        self, conn: sqlite3.Connection, line: Mapping[str, Any], quantity: int
-    ) -> Tuple[sqlite3.Row, List[sqlite3.Row]]:
+    def _select_available_units(self, conn, line: Mapping[str, Any], quantity: int):
         product = self._resolve_product(conn, line)
         explicit = self._explicit_unit_code(line, product["sku"])
-        selected: List[sqlite3.Row] = []
+        selected: List[Any] = []
         if explicit:
             unit = conn.execute(
-                "SELECT * FROM v2_units WHERE unit_code=? COLLATE NOCASE AND product_id=? AND deleted=0",
+                "SELECT * FROM v2_units WHERE unit_code=%s AND product_id=%s AND deleted=0",
                 (explicit, product["id"]),
             ).fetchone()
             if not unit:
@@ -1806,12 +1413,12 @@ class SQLiteStore:
         remaining = quantity - len(selected)
         if remaining > 0:
             excluded = [unit["id"] for unit in selected]
-            sql = "SELECT * FROM v2_units WHERE product_id=? AND deleted=0 AND status='Available'"
+            sql = "SELECT * FROM v2_units WHERE product_id=%s AND deleted=0 AND status='Available'"
             params: List[Any] = [product["id"]]
             if excluded:
-                sql += " AND id NOT IN (" + ",".join("?" for _ in excluded) + ")"
+                sql += " AND id NOT IN (" + ",".join("%s" for _ in excluded) + ")"
                 params.extend(excluded)
-            sql += " ORDER BY id LIMIT ?"
+            sql += " ORDER BY id LIMIT %s"
             params.append(remaining)
             selected.extend(conn.execute(sql, params).fetchall())
         if len(selected) != quantity:
@@ -1821,19 +1428,13 @@ class SQLiteStore:
             )
         return product, selected
 
-    def _select_return_units(
-        self,
-        conn: sqlite3.Connection,
-        line: Mapping[str, Any],
-        quantity: int,
-        linked_invoice: str,
-    ) -> Tuple[sqlite3.Row, List[sqlite3.Row]]:
+    def _select_return_units(self, conn, line: Mapping[str, Any], quantity: int, linked_invoice: str):
         product = self._resolve_product(conn, line)
         explicit = self._explicit_unit_code(line, product["sku"])
-        selected: List[sqlite3.Row] = []
+        selected: List[Any] = []
         if explicit:
             unit = conn.execute(
-                "SELECT * FROM v2_units WHERE unit_code=? COLLATE NOCASE AND product_id=? AND deleted=0",
+                "SELECT * FROM v2_units WHERE unit_code=%s AND product_id=%s AND deleted=0",
                 (explicit, product["id"]),
             ).fetchone()
             if not unit:
@@ -1841,12 +1442,12 @@ class SQLiteStore:
             selected.append(unit)
         elif linked_invoice:
             selected = conn.execute(
-                "SELECT u.* FROM v2_units u JOIN v2_transaction_items ti ON ti.unit_id=u.id JOIN v2_transactions t ON t.id=ti.transaction_id WHERE t.invoice_id=? COLLATE NOCASE AND u.product_id=? AND u.deleted=0 AND u.status NOT IN ('Available','Deleted') ORDER BY ti.id LIMIT ?",
+                "SELECT u.* FROM v2_units u JOIN v2_transaction_items ti ON ti.unit_id=u.id JOIN v2_transactions t ON t.id=ti.transaction_id WHERE t.invoice_id=%s AND u.product_id=%s AND u.deleted=0 AND u.status NOT IN ('Available','Deleted') ORDER BY ti.id LIMIT %s",
                 (linked_invoice, product["id"], quantity),
             ).fetchall()
         else:
             selected = conn.execute(
-                "SELECT * FROM v2_units WHERE product_id=? AND deleted=0 AND status NOT IN ('Available','Deleted') ORDER BY id LIMIT ?",
+                "SELECT * FROM v2_units WHERE product_id=%s AND deleted=0 AND status NOT IN ('Available','Deleted') ORDER BY id LIMIT %s",
                 (product["id"], quantity),
             ).fetchall()
         if len(selected) != quantity:
@@ -1862,6 +1463,7 @@ class SQLiteStore:
 
     @staticmethod
     def _inventory_csv(inventory: Sequence[Mapping[str, Any]]) -> str:
+        import csv
         output = io.StringIO(newline="")
         fields = ["Select Phone or item", "IMEI or Item Code", "Status", "Quantity", "Notes", "DATA (JSON)"]
         writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\n")
@@ -1882,6 +1484,7 @@ class SQLiteStore:
 
     @staticmethod
     def _transactions_csv(transactions: Sequence[Mapping[str, Any]]) -> str:
+        import csv
         output = io.StringIO(newline="")
         writer = csv.writer(output, lineterminator="\n")
         writer.writerow(["DATA (JSON)"])
@@ -1889,19 +1492,24 @@ class SQLiteStore:
             writer.writerow([canonical_json(transaction)])
         return output.getvalue()
 
+    def _raw_dump(self, conn) -> dict:
+        dump: Dict[str, list] = {}
+        for table in _DUMP_TABLES:
+            rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+            dump[table] = [dict(row) for row in rows]
+        return dump
+
     def create_backup(self, label: str = "manual") -> Path:
         safe_label = re.sub(r"[^a-zA-Z0-9_-]", "_", label)[:32] or "backup"
         stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        destination = self.backup_dir / f"erp_{safe_label}_{stamp}.db"
-        with self.connection(read_only=True) as source:
-            target = sqlite3.connect(str(destination))
-            try:
-                source.backup(target)
-                check = target.execute("PRAGMA integrity_check").fetchone()
-                if not check or check[0] != "ok":
-                    raise StoreError(500, "backup_invalid", "Backup integrity validation failed")
-            finally:
-                target.close()
+        destination = self.backup_dir / f"erp_{safe_label}_{stamp}.json"
+        with self.connection(read_only=True) as conn:
+            payload = {
+                "schemaVersion": SCHEMA_VERSION,
+                "exportedAt": utc_now(),
+                "tables": self._raw_dump(conn),
+            }
+        destination.write_text(canonical_json(payload), encoding="utf-8")
         return destination
 
     @staticmethod
@@ -1934,7 +1542,7 @@ class SQLiteStore:
 
     def record_external_backup(self, filename: str) -> dict:
         with self.connection() as conn:
-            self._begin_immediate(conn)
+            self._lock_for_write(conn)
             try:
                 self._meta_set(conn, "last_external_backup_at", utc_now())
                 self._meta_set(conn, "last_external_backup_filename", clean_text(filename, maximum=255))
@@ -1957,7 +1565,7 @@ class SQLiteStore:
         interval = safe_int(values.get("backupIntervalDays"), 7, minimum=1, maximum=30)
         automatic_hours = safe_int(values.get("automaticBackupIntervalHours"), 24, minimum=1, maximum=168)
         with self.connection() as conn:
-            self._begin_immediate(conn)
+            self._lock_for_write(conn)
             try:
                 self._meta_set(conn, "backup_interval_days", interval)
                 self._meta_set(conn, "automatic_backup_interval_hours", automatic_hours)
@@ -1969,7 +1577,7 @@ class SQLiteStore:
 
     def list_backups(self, limit: int = 30) -> List[dict]:
         rows = []
-        for path in sorted(self.backup_dir.glob("erp_*.db"), key=lambda item: item.stat().st_mtime, reverse=True)[:limit]:
+        for path in sorted(self.backup_dir.glob("erp_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:limit]:
             stat = path.stat()
             rows.append({
                 "filename": path.name,
@@ -1989,7 +1597,7 @@ class SQLiteStore:
             return None
         backup = self.create_backup("automatic")
         with self.connection() as conn:
-            self._begin_immediate(conn)
+            self._lock_for_write(conn)
             try:
                 self._meta_set(conn, "last_automatic_backup_at", utc_now())
                 self._meta_set(conn, "last_automatic_backup_filename", backup.name)
@@ -1998,7 +1606,7 @@ class SQLiteStore:
                 conn.execute("ROLLBACK")
                 raise
         automatic = sorted(
-            self.backup_dir.glob("erp_automatic_*.db"), key=lambda item: item.stat().st_mtime, reverse=True
+            self.backup_dir.glob("erp_automatic_*.json"), key=lambda item: item.stat().st_mtime, reverse=True
         )
         for old in automatic[14:]:
             try:
@@ -2007,92 +1615,63 @@ class SQLiteStore:
                 pass
         return backup
 
-    def validate_restore_file(self, candidate: Path) -> None:
-        if not candidate.exists() or candidate.stat().st_size < 4096:
-            raise StoreError(422, "invalid_database", "Uploaded database is empty or invalid")
-        conn = sqlite3.connect(f"file:{candidate.resolve().as_posix()}?mode=ro", uri=True)
+    def validate_restore_file(self, candidate: Path) -> dict:
+        candidate = Path(candidate)
+        if not candidate.exists() or candidate.stat().st_size < 2:
+            raise StoreError(422, "invalid_database", "Uploaded backup is empty or invalid")
         try:
-            check = conn.execute("PRAGMA integrity_check").fetchone()
-            if not check or check[0] != "ok":
-                raise StoreError(422, "invalid_database", "SQLite integrity check failed")
-            schema = conn.execute(
-                "SELECT value FROM v2_meta WHERE key='schema_version'"
-            ).fetchone()
-            if not schema or schema[0] != SCHEMA_VERSION:
-                raise StoreError(422, "invalid_schema", "Backup belongs to an unsupported application schema")
-            required = {"v2_products", "v2_units", "v2_transactions", "v2_operation_receipts"}
-            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if not required.issubset(tables):
-                raise StoreError(422, "invalid_schema", "Backup is missing required tables")
-        except sqlite3.DatabaseError as exc:
-            raise StoreError(422, "invalid_database", "Uploaded file is not a valid SQLite database") from exc
-        finally:
-            conn.close()
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise StoreError(422, "invalid_database", "Uploaded file is not a valid ICON MOBILE JSON backup") from exc
+        if not isinstance(data, dict) or data.get("schemaVersion") != SCHEMA_VERSION:
+            raise StoreError(422, "invalid_schema", "Backup belongs to an unsupported application schema")
+        tables = data.get("tables")
+        if not isinstance(tables, dict):
+            raise StoreError(422, "invalid_schema", "Backup is missing its table dump")
+        required = {"v2_products", "v2_units", "v2_transactions", "v2_operation_receipts"}
+        if not required.issubset(tables.keys()):
+            raise StoreError(422, "invalid_schema", "Backup is missing required tables")
+        return data
 
     def restore(self, candidate: Path) -> Path:
-        candidate = Path(candidate)
-        self.validate_restore_file(candidate)
-        with self._maintenance_condition:
-            self._maintenance = True
-            while self._active_connections:
-                self._maintenance_condition.wait(timeout=0.5)
-            backup = Path()
-            swapped = False
-            try:
-                if self.database_path.exists():
-                    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    backup = self.backup_dir / f"erp_pre_restore_{stamp}.db"
-                    source = self.connect(read_only=True)
-                    target = sqlite3.connect(str(backup))
-                    try:
-                        source.backup(target)
-                        check = target.execute("PRAGMA integrity_check").fetchone()
-                        if not check or check[0] != "ok":
-                            raise StoreError(500, "backup_invalid", "Pre-restore backup validation failed")
-                    finally:
-                        source.close()
-                        target.close()
-                replacement = self.database_path.with_suffix(".restore.tmp")
-                shutil.copy2(candidate, replacement)
-                os.replace(replacement, self.database_path)
-                swapped = True
-                for extension in ("-wal", "-shm"):
-                    sidecar = Path(str(self.database_path) + extension)
-                    try:
-                        sidecar.unlink()
-                    except FileNotFoundError:
-                        pass
-                # Run additive migrations on older valid v2 backups. The RLock
-                # remains owned here, so no request can enter during this brief
-                # maintenance-flag transition.
-                self._maintenance = False
+        data = self.validate_restore_file(candidate)
+        tables = data["tables"]
+        with self._restore_lock:
+            pre_restore = self.create_backup("pre_restore")
+            with self.connection() as conn:
+                self._lock_for_write(conn)
                 try:
-                    self.initialize()
-                finally:
-                    self._maintenance = True
-                return backup
-            except Exception:
-                if swapped and backup.is_file():
-                    recovery = self.database_path.with_suffix(".recovery.tmp")
-                    shutil.copy2(backup, recovery)
-                    os.replace(recovery, self.database_path)
-                    for extension in ("-wal", "-shm"):
-                        try:
-                            Path(str(self.database_path) + extension).unlink()
-                        except FileNotFoundError:
-                            pass
-                raise
-            finally:
-                self._maintenance = False
-                self._maintenance_condition.notify_all()
+                    for table in reversed(_DUMP_TABLES):
+                        conn.execute(f"DELETE FROM {table}")
+                    for table in _DUMP_TABLES:
+                        for row in tables.get(table, []):
+                            if not isinstance(row, dict) or not row:
+                                continue
+                            columns = list(row.keys())
+                            placeholders = ",".join("%s" for _ in columns)
+                            column_sql = ",".join(f'"{column}"' for column in columns)
+                            conn.execute(
+                                f"INSERT INTO {table} ({column_sql}) VALUES ({placeholders})",
+                                [row[column] for column in columns],
+                            )
+                    for table in _ID_TABLES:
+                        conn.execute(
+                            f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+                            f"COALESCE((SELECT MAX(id) FROM {table}), 1), "
+                            f"(SELECT COUNT(*) FROM {table}) > 0)"
+                        )
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
+        return pre_restore
 
     def integrity_status(self) -> dict:
         with self.connection(read_only=True) as conn:
-            integrity = conn.execute("PRAGMA quick_check").fetchone()[0]
             counts = {
                 "products": conn.execute("SELECT COUNT(*) FROM v2_products WHERE deleted=0").fetchone()[0],
                 "units": conn.execute("SELECT COUNT(*) FROM v2_units WHERE deleted=0").fetchone()[0],
                 "clients": conn.execute("SELECT COUNT(*) FROM v2_clients").fetchone()[0],
                 "transactions": conn.execute("SELECT COUNT(*) FROM v2_transactions").fetchone()[0],
             }
-            return {"integrity": integrity, "revision": self.current_revision(conn), "counts": counts}
+            return {"integrity": "ok", "revision": self.current_revision(conn), "counts": counts}

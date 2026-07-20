@@ -121,6 +121,9 @@
         if (response.status === 401) {
           window.dispatchEvent(new CustomEvent("icon:auth-required"));
         }
+        if (payload && payload.code === "token_limited") {
+          window.dispatchEvent(new CustomEvent("icon:token-limited", { detail: payload.details }));
+        }
         throw makeError(message || `Request failed (${response.status}).`, response.status, payload);
       }
       return payload || { success: true };
@@ -429,6 +432,49 @@
   });
   window.addEventListener("offline", function () {
     emit({ type: "connection", online: false, source: "browser" });
+  });
+
+  window.addEventListener("icon:token-limited", function(e) {
+    const details = e.detail || {};
+    const amount = details.amount || "10.00";
+    let overlay = document.getElementById("icon-billing-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "icon-billing-overlay";
+      overlay.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-family:sans-serif;text-align:center;padding:20px;backdrop-filter:blur(8px);";
+      
+      const box = document.createElement("div");
+      box.style.cssText = "background:#1e293b;padding:40px;border-radius:16px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);max-width:400px;width:100%;border:1px solid #334155;";
+      
+      const icon = document.createElement("div");
+      icon.innerHTML = "⚠️";
+      icon.style.cssText = "font-size:48px;margin-bottom:20px;";
+      
+      const title = document.createElement("h2");
+      title.innerText = "Token Limit Reached";
+      title.style.cssText = "margin:0 0 15px 0;font-size:24px;font-weight:bold;color:#f1f5f9;";
+      
+      const msg = document.createElement("p");
+      msg.innerText = "Your usage token is limited. Please pay the balance to continue using the system.";
+      msg.style.cssText = "margin:0 0 25px 0;font-size:16px;color:#94a3b8;line-height:1.5;";
+      
+      const amt = document.createElement("div");
+      amt.innerText = "Amount Due: $" + amount;
+      amt.style.cssText = "font-size:32px;font-weight:800;color:#38bdf8;margin-bottom:30px;background:#0f172a;padding:15px;border-radius:8px;";
+      
+      const btn = document.createElement("button");
+      btn.innerText = "Pay Now";
+      btn.style.cssText = "background:#3b82f6;color:white;border:none;padding:12px 24px;font-size:16px;font-weight:bold;border-radius:8px;cursor:pointer;width:100%;transition:background 0.2s;";
+      btn.onclick = () => alert("Payment gateway integration pending.");
+      
+      box.appendChild(icon);
+      box.appendChild(title);
+      box.appendChild(msg);
+      box.appendChild(amt);
+      box.appendChild(btn);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+    }
   });
 
   window.IconAPI = Object.freeze({

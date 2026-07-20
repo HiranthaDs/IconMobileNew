@@ -1,14 +1,19 @@
-"""ICON MOBILE local ERP server.
+"""ICON MOBILE backend (Supabase/Postgres).
 
-FastAPI is the only runtime backend.  Every authoritative record is stored in
-``erp.db`` and every browser on the same LAN talks to this process.  Node.js is
-used only by ``npm run build`` to create the offline browser assets.
+FastAPI application that preserves every endpoint and behaviour of the original
+local ERP server, but stores all authoritative records in Supabase Postgres via
+``PostgresStore`` instead of a local SQLite file.  Static pages and assets are
+served from the ``frontend/`` directory.
+
+Run from the ``backend`` directory so the ``app`` package resolves:
+
+    cd backend
+    ../.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 """
 
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
 import io
 import json
 import logging
@@ -16,77 +21,48 @@ import os
 import re
 import socket
 import tempfile
-import threading
 import time
 import uuid
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
-import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend_security import COOKIE_NAME, SessionIdentity, SessionSigner, load_or_create_secret, password_matches
-from backend_store import SCHEMA_VERSION, SQLiteStore, StoreError, canonical_json, utc_now
+from app.core.security import COOKIE_NAME, PASSWORDS, SessionIdentity, get_signer, password_matches
+from app.store.helpers import SCHEMA_VERSION, StoreError, utc_now
+from app.store.store import PostgresStore
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
+PAGES_DIR = FRONTEND_DIR / "pages"
+ASSETS_DIR = FRONTEND_DIR / "assets"
 
-BASE_DIR = Path(__file__).resolve().parent
-
-
-def _load_dotenv(path: Path) -> None:
-    """Load a small, dependency-free .env file without overriding real env vars."""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return
-    for raw in lines:
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
-
-
-_load_dotenv(BASE_DIR / ".env")
+load_dotenv(PROJECT_ROOT / ".env")
 
 HOST = os.environ.get("ICON_HOST", "0.0.0.0")
 PORT = int(os.environ.get("ICON_PORT", "8000"))
 MAX_REQUEST_BYTES = max(64 * 1024, int(os.environ.get("MAX_REQUEST_BYTES", str(5 * 1024 * 1024))))
 MAX_RESTORE_BYTES = max(MAX_REQUEST_BYTES, int(os.environ.get("MAX_RESTORE_BYTES", str(512 * 1024 * 1024))))
-SESSION_HOURS = max(1, min(168, int(os.environ.get("SESSION_HOURS", "12"))))
-DB_FILE = Path(os.environ.get("ICON_DB_FILE", str(BASE_DIR / "erp.db")))
-if not DB_FILE.is_absolute():
-    DB_FILE = (BASE_DIR / DB_FILE).resolve()
-BACKUP_DIR = Path(os.environ.get("ICON_BACKUP_DIR", str(BASE_DIR / "_backups")))
+BACKUP_DIR = Path(os.environ.get("ICON_BACKUP_DIR", str(PROJECT_ROOT / "_backups")))
 if not BACKUP_DIR.is_absolute():
-    BACKUP_DIR = (BASE_DIR / BACKUP_DIR).resolve()
-ASSETS_DIR = BASE_DIR / "assets"
-
-PASSWORDS = {
-    "pos": os.environ.get("POS_PASSWORD", "ICONM@2026"),
-    "admin": os.environ.get("ADMIN_PASSWORD", "ADMIN@2026"),
-    "wholesale": os.environ.get("WHOLESALE_PASSWORD", "ADMIN@WS"),
-}
+    BACKUP_DIR = (PROJECT_ROOT / BACKUP_DIR).resolve()
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("icon-mobile")
 
-store = SQLiteStore(DB_FILE, BACKUP_DIR)
-signer = SessionSigner(load_or_create_secret(BASE_DIR), SESSION_HOURS * 3600)
+store = PostgresStore(BACKUP_DIR)
+signer = get_signer()
 
 app = FastAPI(
-    title="ICON MOBILE Local ERP API",
-    version="3.0.0",
+    title="ICON MOBILE Backend API",
+    version="4.0.0",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -196,7 +172,7 @@ async def handle_validation_error(_: Request, exc: RequestValidationError) -> JS
 @app.exception_handler(Exception)
 async def handle_unexpected_error(_: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled server error", exc_info=exc)
-    return error_response(500, "internal_error", "The local server encountered an unexpected error")
+    return error_response(500, "internal_error", "The server encountered an unexpected error")
 
 
 def _same_origin(request: Request) -> bool:
@@ -226,7 +202,6 @@ async def security_middleware(request: Request, call_next):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=()"
-    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
     elif request.url.path.startswith("/assets/"):
@@ -239,8 +214,8 @@ async def security_middleware(request: Request, call_next):
 # ---------------------------------------------------------------------------
 
 
-_login_attempts: Dict[str, deque[float]] = defaultdict(deque)
-_login_lock = threading.Lock()
+_login_attempts: Dict[str, deque] = defaultdict(deque)
+_login_lock = asyncio.Lock()
 LOGIN_WINDOW_SECONDS = 5 * 60
 LOGIN_MAX_FAILURES = 8
 
@@ -249,7 +224,7 @@ def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _prune_attempts(key: str) -> deque[float]:
+def _prune_attempts(key: str) -> deque:
     now = time.monotonic()
     attempts = _login_attempts[key]
     while attempts and attempts[0] < now - LOGIN_WINDOW_SECONDS:
@@ -260,7 +235,7 @@ def _prune_attempts(key: str) -> deque[float]:
 def require_identity(request: Request, roles: Optional[Iterable[str]] = None) -> SessionIdentity:
     identity = signer.verify(request.cookies.get(COOKIE_NAME))
     if not identity:
-        raise StoreError(401, "authentication_required", "Please sign in to the local server")
+        raise StoreError(401, "authentication_required", "Please sign in to the server")
     allowed = set(roles or ())
     if allowed and identity.role not in allowed:
         raise StoreError(403, "forbidden", "Your account cannot perform this operation")
@@ -290,21 +265,21 @@ async def login(request: Request) -> JSONResponse:
     if role not in PASSWORDS:
         raise StoreError(401, "invalid_credentials", "Incorrect role or password")
     key = _client_key(request)
-    with _login_lock:
+    async with _login_lock:
         attempts = _prune_attempts(key)
         if len(attempts) >= LOGIN_MAX_FAILURES:
             wait = max(1, int(LOGIN_WINDOW_SECONDS - (time.monotonic() - attempts[0])))
             raise StoreError(429, "login_locked", f"Too many failed logins. Try again in {wait} seconds")
     if not password_matches(password, PASSWORDS[role]):
-        with _login_lock:
+        async with _login_lock:
             _prune_attempts(key).append(time.monotonic())
         raise StoreError(401, "invalid_credentials", "Incorrect role or password")
-    with _login_lock:
+    async with _login_lock:
         _login_attempts.pop(key, None)
     token, identity = signer.issue(role)
     response = JSONResponse({
         "success": True,
-        "message": "Signed in to the local server.",
+        "message": "Signed in to the server.",
         "data": {"role": identity.role, "expiresAt": identity.expires_at},
     })
     response.set_cookie(
@@ -337,11 +312,11 @@ async def session_info(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def lan_ipv4_addresses() -> list[str]:
-    addresses: set[str] = set()
+def lan_ipv4_addresses() -> list:
+    addresses: set = set()
     try:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        probe.connect(("192.0.2.1", 80))  # routing lookup only; no packet is required
+        probe.connect(("192.0.2.1", 80))
         addresses.add(probe.getsockname()[0])
         probe.close()
     except OSError:
@@ -367,7 +342,7 @@ async def _automatic_backup_loop() -> None:
         try:
             path = await run_in_threadpool(store.ensure_automatic_backup)
             if path:
-                logger.info("Created automatic SQLite backup: %s", path.name)
+                logger.info("Created automatic backup: %s", path.name)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -392,7 +367,7 @@ async def stop_background_services() -> None:
 
 
 # ---------------------------------------------------------------------------
-# JSON API and live LAN revision stream
+# JSON API and live revision stream
 # ---------------------------------------------------------------------------
 
 
@@ -457,21 +432,18 @@ async def action(request: Request) -> dict:
 
 @app.api_route("/exec", methods=["GET", "POST"])
 async def compatibility_exec(request: Request) -> dict:
-    """Local compatibility endpoint for any older saved browser copy."""
     body = await _read_json_object(request)
     action_name = str(body.get("action", "fetch_data"))
     if action_name in {"fetch_data", "getData", "get", "load"}:
         require_identity(request)
         data = await run_in_threadpool(lambda: store.snapshot(include_legacy_csv=True))
         data.update(lan_metadata())
-        return {"success": True, "message": "Local SQLite snapshot loaded.", "data": data}
+        return {"success": True, "message": "Snapshot loaded.", "data": data}
     return await _execute_payload(request, body)
 
 
 @app.websocket("/api/v1/events")
 async def revision_events(websocket: WebSocket) -> None:
-    # This channel reveals only an ever-increasing integer.  Keeping it public
-    # lets a shared invoice page refresh without exposing inventory/customer data.
     device_id = websocket.query_params.get("device", "unknown-device")
     if not await live_connections.connect(websocket, device_id):
         return
@@ -563,7 +535,7 @@ async def local_scanner_channel(websocket: WebSocket, channel_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Local QR/barcode generation (no third-party Internet services)
+# Local QR/barcode generation
 # ---------------------------------------------------------------------------
 
 
@@ -616,7 +588,7 @@ async def local_barcode(text: str) -> StreamingResponse:
 
 
 # ---------------------------------------------------------------------------
-# Protected backup, restore, export, and health
+# Protected settings, backup, restore, export, and health
 # ---------------------------------------------------------------------------
 
 
@@ -655,14 +627,13 @@ async def download_backup(request: Request) -> FileResponse:
     require_identity(request, {"admin"})
     path = await run_in_threadpool(store.create_backup, "manual")
     await run_in_threadpool(store.record_external_backup, path.name)
-    return FileResponse(path, filename=path.name, media_type="application/vnd.sqlite3")
+    return FileResponse(path, filename=path.name, media_type="application/json")
 
 
 @app.post("/api/v1/restore")
 async def restore_backup(request: Request, file: UploadFile = File(...)) -> dict:
     require_identity(request, {"admin"})
-    suffix = ".upload.tmp"
-    descriptor, name = tempfile.mkstemp(prefix="icon_restore_", suffix=suffix, dir=BACKUP_DIR)
+    descriptor, name = tempfile.mkstemp(prefix="icon_restore_", suffix=".upload.tmp", dir=BACKUP_DIR)
     os.close(descriptor)
     candidate = Path(name)
     total = 0
@@ -679,7 +650,7 @@ async def restore_backup(request: Request, file: UploadFile = File(...)) -> dict
             handle.flush()
             os.fsync(handle.fileno())
         pre_restore = await run_in_threadpool(store.restore, candidate)
-        await run_in_threadpool(store.record_external_backup, f"restored-{Path(file.filename or 'backup.db').name}")
+        await run_in_threadpool(store.record_external_backup, f"restored-{Path(file.filename or 'backup.json').name}")
         status = await run_in_threadpool(store.integrity_status)
         await live_connections.broadcast_reset(int(status["revision"]))
         return {
@@ -723,12 +694,11 @@ async def export_csv(kind: str, request: Request) -> Response:
 @app.get("/api/health")
 async def health() -> dict:
     status = await run_in_threadpool(store.integrity_status)
-    return {"success": True, "status": "online", "database": DB_FILE.name, **status, **lan_metadata()}
+    return {"success": True, "status": "online", "database": "supabase", **status, **lan_metadata()}
 
 
 # ---------------------------------------------------------------------------
-# Explicit static allowlist.  The DB, WAL, source, .env, and backups are never
-# mounted, even when a filename is guessed from another device.
+# Static frontend.  Pages come from frontend/pages, assets from frontend/assets.
 # ---------------------------------------------------------------------------
 
 
@@ -745,56 +715,34 @@ STATIC_FILES = {
     "/settings.html": "settings.html",
     "/scanner.html": "scanner.html",
     "/B2Binvoice.html": "B2Binvoice.html",
-    "/service-worker.js": "service-worker.js",
-    "/logo.png": "logo.png",
-    "/logo watermark.png": "logo watermark.png",
-    "/warranty.png": "warranty.png",
-    "/Google reviews.png": "Google reviews.png",
-    "/Google.png": "Google.png",
-    "/google.png": "Google.png",
-    "/googlemap.png": "googlemap.png",
-    "/Map Qr.png": "Map Qr.png",
 }
 
 
+def make_static_handler(path: Path):
+    async def serve() -> FileResponse:
+        if not path.is_file():
+            raise HTTPException(404, "Static file not found")
+        return FileResponse(path)
+    return serve
+
+
 for route_path, filename in STATIC_FILES.items():
-    file_path = BASE_DIR / filename
+    app.add_api_route(route_path, make_static_handler(PAGES_DIR / filename), methods=["GET"], include_in_schema=False)
 
-    def make_static_handler(path: Path):
-        async def serve() -> FileResponse:
-            if not path.is_file():
-                raise HTTPException(404, "Static file not found")
-            media = "application/javascript" if path.suffix == ".js" else None
-            return FileResponse(path, media_type=media)
-        return serve
 
-    app.add_api_route(route_path, make_static_handler(file_path), methods=["GET"], include_in_schema=False)
+async def _serve_service_worker() -> FileResponse:
+    path = FRONTEND_DIR / "service-worker.js"
+    if not path.is_file():
+        raise HTTPException(404, "Static file not found")
+    return FileResponse(path, media_type="application/javascript")
+
+
+app.add_api_route("/service-worker.js", _serve_service_worker, methods=["GET"], include_in_schema=False)
 
 
 @app.get("/{unknown_path:path}", include_in_schema=False)
 async def static_not_found(unknown_path: str) -> HTMLResponse:
     return HTMLResponse(
-        "<h1>404 - Not Found</h1><p>This file is not exposed by the ICON MOBILE local server.</p>",
+        "<h1>404 - Not Found</h1><p>This file is not exposed by the ICON MOBILE server.</p>",
         status_code=404,
     )
-
-
-def main() -> None:
-    addresses = lan_ipv4_addresses()
-    print("=" * 72)
-    print(" ICON MOBILE - LOCAL SQLITE / LAN SERVER")
-    print("=" * 72)
-    print(f" This computer : http://localhost:{PORT}/")
-    for address in addresses:
-        print(f" Other devices : http://{address}:{PORT}/   (same Wi-Fi/LAN)")
-    print(f" Database       : {DB_FILE}")
-    print(" POS            : /")
-    print(" Inventory      : /ADMINPRO.html")
-    print(" Wholesale      : /wholesale.html")
-    print(" Keep this window open. Do not share the SQLite file over a network drive.")
-    print("=" * 72)
-    uvicorn.run(app, host=HOST, port=PORT, log_level=os.environ.get("UVICORN_LOG_LEVEL", "info"))
-
-
-if __name__ == "__main__":
-    main()

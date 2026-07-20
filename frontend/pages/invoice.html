@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ICON MOBILE - Digital Invoice View</title>
     
-    <link rel="stylesheet" href="/assets/app.css">
-    <script src="/assets/vendor/react.production.min.js"></script>
-    <script src="/assets/vendor/react-dom.production.min.js"></script>
-    <script src="/assets/vendor/babel.min.js"></script>
-    <script src="/assets/local-api.js"></script>
+    <link rel="stylesheet" href="/assets/css/app.css">
+    <script src="/assets/js/vendor/react.production.min.js"></script>
+    <script src="/assets/js/vendor/react-dom.production.min.js"></script>
+    <script src="/assets/js/vendor/babel.min.js"></script>
+    <script src="/assets/js/local-api.js"></script>
 
     <style>
         :root {
@@ -408,13 +408,13 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                             }}
                         >
                             
-                            <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none z-0"><img src="logo watermark.png" alt="" className="w-[80%] object-contain" onError={(e) => e.target.style.display='none'} /></div>
+                            <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none z-0"><img src="/assets/images/logo watermark.png" alt="" className="w-[80%] object-contain" onError={(e) => e.target.style.display='none'} /></div>
                             <div className="relative z-10 flex flex-col w-full h-full flex-1">
                                 
                                 {/* Header with updated address and phone number */}
                                 <div className="shrink-0 flex flex-row print-row justify-between items-start border-b-2 border-[#1d1d1f] pb-4 mb-5 gap-4">
                                     <div className="flex items-center gap-4">
-                                        <img src="logo.png" alt="Logo" className="h-[60px] w-[60px] object-contain rounded-xl" onError={(e) => e.target.style.display='none'} />
+                                        <img src="/assets/images/logo.png" alt="Logo" className="h-[60px] w-[60px] object-contain rounded-xl" onError={(e) => e.target.style.display='none'} />
                                         <div className="leading-tight">
                                             <h1 className="text-[28px] font-black text-gray-900 tracking-tighter uppercase mb-0.5">ICON MOBILE</h1>
                                             <p className="text-[10px] font-semibold text-gray-600">No:59, First Floor, Liberty Plaza, colombo 03</p>
@@ -574,20 +574,20 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                         <div className="flex flex-col gap-4">
                                             <div className="flex flex-col gap-3">
                                                 <div className="flex items-center gap-3">
-                                                    <img src="Google reviews.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display='none'} />
+                                                    <img src="/assets/images/Google reviews.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display='none'} />
                                                     <div>
                                                         <div className="flex items-center gap-1.5 mb-0.5">
-                                                            <img src="google.png" alt="G" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display='none'} />
+                                                            <img src="/assets/images/Google.png" alt="G" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display='none'} />
                                                             <span className="font-black text-[8.5px] text-gray-900 uppercase tracking-widest">Review us on Google</span>
                                                         </div>
                                                         <p className="text-[8px] font-medium text-gray-500 leading-tight">Scan the QR code to share your experience!</p>
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-3">
-                                                    <img src="Map Qr.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display='none'} />
+                                                    <img src="/assets/images/Map Qr.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display='none'} />
                                                     <div>
                                                         <div className="flex items-center gap-1.5 mb-0.5">
-                                                            <img src="googlemap.png" alt="Map" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display='none'} />
+                                                            <img src="/assets/images/googlemap.png" alt="Map" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display='none'} />
                                                             <span className="font-black text-[8.5px] text-gray-900 uppercase tracking-widest">Find Us on Map</span>
                                                         </div>
                                                         <p className="text-[8px] font-medium text-gray-500 leading-tight">Scan the QR code to get directions to our store!</p>
@@ -606,7 +606,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                     </div>
                                     <div className="w-[55%] print-w-55 relative flex flex-col justify-end">
                                         <div className="absolute inset-0 flex items-center justify-center opacity-[0.05] pointer-events-none z-0">
-                                            <img src="Warranty.png" alt="" className="w-full object-contain" onError={(e) => e.target.style.display='none'} />
+                                            <img src="/assets/images/warranty.png" alt="" className="w-full object-contain" onError={(e) => e.target.style.display='none'} />
                                         </div>
                                         <div className="relative z-10 flex flex-col gap-4">
                                             {itemsWithWarranty.length > 0 && (
