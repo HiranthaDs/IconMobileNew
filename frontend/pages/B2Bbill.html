@@ -15,35 +15,32 @@
         :root { --bg:#f8fafc; --ink:#0f172a; }
         * { box-sizing:border-box; }
         body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,sans-serif; -webkit-font-smoothing:antialiased; }
-        .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; border-radius:12px; font-weight:800; transition:.15s; cursor:pointer; }
-        .btn:hover { transform:translateY(-1px); }
-        .fade-in { animation:fadeIn .2s ease-out both; }
-        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-        .mono { font-family:'JetBrains Mono', monospace; }
-        .tracking-tightest { letter-spacing: -0.04em; }
-        @page { size: A4 portrait; margin: 12mm 0; }
-        .a4-container { width: min(210mm, calc(100vw - 24px)); min-height: 297mm; margin: 100px auto 48px; padding: 15mm; background:#fff; box-sizing:border-box; box-shadow:0 24px 70px rgba(15,23,42,.14); border:1px solid #e2e8f0; position: relative; overflow: hidden; }
         @media print {
-            html, body, #root { width:100% !important; height:auto !important; min-height:0 !important; overflow:visible !important; background:#fff !important; margin:0; padding:0; }
-            .no-print { display:none !important; visibility:hidden !important; }
-            body * { visibility:hidden !important; }
-            #printable-document, #printable-document * { visibility:visible !important; }
-            #printable-document {
-                position:absolute !important; left:0 !important; top:0 !important;
-                width:210mm !important; min-height:297mm !important; margin:0 auto !important; padding:0 15mm !important;
-                background:#fff !important; box-shadow:none !important; border:none !important; overflow:visible !important;
+            @page { size: A4 portrait; margin: 0; }
+            html, body {
+                width: 210mm !important; height: 297mm !important; max-height: 297mm !important;
+                background-color: #ffffff !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important;
+                -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
             }
-            .avoid-break { break-inside: avoid; page-break-inside: avoid; }
-            table { border-collapse: collapse; page-break-inside: auto; }
-            tr { break-inside: avoid; page-break-inside: avoid; page-break-after: auto; }
-            thead { display: table-header-group; }
-            * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+            .no-print { display: none !important; }
+            .invoice-wrapper { display: block !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; background: none !important; }
+            .invoice-page {
+                width: 210mm !important; height: 297mm !important; max-height: 297mm !important;
+                background-color: #ffffff !important; box-shadow: none !important; margin: 0 !important;
+                padding: 12mm 15mm !important; border-radius: 0 !important; position: absolute !important;
+                top: 0 !important; left: 0 !important; display: flex !important; flex-direction: column !important;
+                page-break-after: avoid !important; page-break-inside: avoid !important; transform: none !important;
+            }
+            .print-row { flex-direction: row !important; }
+            .print-w-45 { width: 45% !important; }
+            .print-w-55 { width: 55% !important; }
+            .print-overflow-visible { overflow: visible !important; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
         .boot-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at top left, #e0f2fe 0, transparent 36%), radial-gradient(circle at bottom right, #dbeafe 0, transparent 34%), #f8fafc; padding:24px; }
         .boot-card { width:min(420px, 100%); background:rgba(255,255,255,.78); border:1px solid rgba(255,255,255,.72); border-radius:34px; padding:34px; box-shadow:0 30px 90px rgba(15,23,42,.16); backdrop-filter:blur(24px) saturate(180%); text-align:center; }
         .boot-spinner { width:48px; height:48px; border-radius:999px; border:4px solid rgba(37,99,235,.12); border-top-color:#2563eb; animation:spin .9s linear infinite; margin:0 auto 18px; }
         @keyframes spin { to { transform:rotate(360deg); } }
-        .apple-panel { background:rgba(255,255,255,.9); border:1px solid rgba(255,255,255,.8); box-shadow:0 30px 90px rgba(15,23,42,.15); backdrop-filter:blur(24px) saturate(180%); }
     </style>
 </head>
 <body>
@@ -136,6 +133,26 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
             const [data, setData] = useState(null);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState("");
+            const [scale, setScale] = useState(1);
+
+            useEffect(() => {
+                const updateScale = () => {
+                    if (window.matchMedia('print').matches) { setScale(1); return; }
+                    const screenWidth = window.innerWidth;
+                    const pageWidthPx = 794;
+                    setScale(screenWidth < pageWidthPx + 32 ? (screenWidth - 24) / pageWidthPx : 1);
+                };
+                updateScale();
+                window.addEventListener('resize', updateScale);
+                const printQuery = window.matchMedia('print');
+                if (printQuery.addEventListener) printQuery.addEventListener('change', updateScale);
+                else printQuery.addListener(updateScale);
+                return () => {
+                    window.removeEventListener('resize', updateScale);
+                    if (printQuery.removeEventListener) printQuery.removeEventListener('change', updateScale);
+                    else printQuery.removeListener(updateScale);
+                };
+            }, []);
 
             const fetchInvoice = useCallback(async (silent = false) => {
                 if (!silent) { setLoading(true); setError(""); }
@@ -201,124 +218,141 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
             const barcodeUrl = window.IconAPI.apiUrl(`/api/v1/barcode?text=${encodeURIComponent(invoiceId)}`);
 
             return (
-                <div className="min-h-screen bg-slate-100 flex flex-col items-center pb-20">
-                    <div className="fixed inset-x-0 top-4 z-50 no-print flex justify-center px-4 pointer-events-none">
-                        <div className="pointer-events-auto apple-panel rounded-[24px] p-4 w-full max-w-md shadow-[0_20px_60px_rgba(0,0,0,0.1)] flex items-center justify-between gap-4">
-                            <p className="text-slate-500 text-xs font-semibold">Official Digital Document</p>
-                            <button type="button" onClick={() => window.print()} className="btn px-5 py-2.5 bg-slate-900 hover:bg-black text-white font-black uppercase tracking-widest text-[10px]"><Icons.Print /> Save PDF</button>
-                        </div>
+                <div className="min-h-screen pt-4 pb-[100px] flex flex-col items-center invoice-wrapper">
+                    <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:absolute sm:top-6 sm:right-6 sm:bottom-auto flex flex-row gap-3 no-print z-50">
+                        <button onClick={() => fetchInvoice(false)} className="flex items-center justify-center w-12 h-12 bg-white border border-gray-200 text-gray-700 hover:text-blue-600 rounded-xl sm:rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:bg-gray-50 transition-all hover:-translate-y-0.5" title="Refresh Invoice Data">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        </button>
+                        <button onClick={() => window.print()} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-900 hover:bg-black text-white px-6 py-3 rounded-xl sm:rounded-full shadow-[0_8px_20px_rgba(15,23,42,0.4)] transition-transform hover:-translate-y-0.5 font-bold text-sm border-none cursor-pointer">
+                            <Icons.Print /> Save PDF
+                        </button>
                     </div>
 
-                    <div id="printable-document" className="a4-container fade-in text-[13px] text-slate-900 leading-normal">
-                        <div className="flex justify-between items-start border-b-[3px] border-slate-900 pb-6 mb-8 avoid-break">
-                            <div>
-                                <h1 className="text-4xl font-black text-slate-900 tracking-tighter mb-1">ICON MOBILE</h1>
-                                <p className="text-[11px] text-slate-600 font-black uppercase tracking-widest">B2B Wholesale Division</p>
-                                <p className="text-[11px] text-slate-500 font-bold mt-4">No:59, First Floor, Liberty Plaza, Colombo 03</p>
-                                <p className="text-[11px] text-slate-500 font-bold mt-0.5">0772729226 / 0701442299</p>
-                            </div>
-                            <div className="text-right flex flex-col items-end">
-                                <h2 className="text-3xl font-black text-blue-600 tracking-tight uppercase mb-3">{docTitle}</h2>
-                                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px] text-slate-700 text-left w-fit ml-auto mb-4">
-                                    <span className="font-black text-slate-500 uppercase tracking-widest text-[10px] self-center">Inv No:</span>
-                                    <span className="font-black text-slate-900 text-lg">{invoiceId}</span>
-                                    <span className="font-black text-slate-500 uppercase tracking-widest text-[10px] self-center">Date:</span>
-                                    <span className="font-black text-slate-900">{dateText}</span>
+                    <p className="text-gray-500 text-[10px] sm:text-xs font-semibold uppercase tracking-widest mb-4 mt-2 no-print text-center w-full">
+                        Official Digital Document
+                    </p>
+
+                    <div className="w-full flex justify-center print-overflow-visible overflow-hidden" style={{ height: `calc(${297 * scale}mm + 40px)` }}>
+                        <div
+                            id="printable-document"
+                            className="invoice-page shrink-0 relative bg-white shadow-2xl print:shadow-none box-border flex flex-col overflow-hidden text-[13px] text-slate-900"
+                            style={{ width: '210mm', minWidth: '210mm', height: '297mm', minHeight: '297mm', maxHeight: '297mm', padding: '15mm', transform: `scale(${scale})`, transformOrigin: 'top center' }}
+                        >
+                            <div className="shrink-0 flex flex-row print-row justify-between items-start border-b-2 border-slate-900 pb-4 mb-4 gap-4">
+                                <div className="flex items-center gap-4">
+                                    <img src="/assets/images/logo.png" alt="Logo" className="h-[55px] w-[55px] object-contain rounded-xl" onError={(e) => e.target.style.display = 'none'} />
+                                    <div className="leading-tight">
+                                        <h1 className="text-[26px] font-black text-slate-900 tracking-tighter uppercase mb-0.5">ICON MOBILE</h1>
+                                        <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">B2B Wholesale Division</p>
+                                        <p className="text-[10px] font-semibold text-slate-500">No:59, First Floor, Liberty Plaza, Colombo 03</p>
+                                        <p className="text-[10px] font-semibold text-slate-500">0772729226 / 0701442299</p>
+                                    </div>
                                 </div>
-                                <img src={qrUrl} alt="Digital Invoice QR" className="w-16 h-16 rounded border border-slate-100 p-1 object-cover mix-blend-multiply" crossOrigin="anonymous" />
+                                <div className="flex items-center justify-between gap-5">
+                                    <div className="text-right">
+                                        <h2 className="text-[22px] font-black text-blue-600 tracking-widest uppercase leading-none mb-1.5">{docTitle}</h2>
+                                        <div className="flex flex-col gap-[2px] text-[10px] text-slate-800 font-medium">
+                                            <div className="flex justify-end gap-2"><span className="text-slate-500 uppercase tracking-widest text-[8px] font-bold">Invoice No:</span><span className="font-bold">{invoiceId}</span></div>
+                                            <div className="flex justify-end gap-2"><span className="text-slate-500 uppercase tracking-widest text-[8px] font-bold">Date:</span><span className="font-bold">{dateText}</span></div>
+                                        </div>
+                                    </div>
+                                    <div className="border border-slate-200 p-1 bg-white rounded shadow-sm shrink-0">
+                                        <img src={qrUrl} alt="QR" className="w-[55px] h-[55px] object-contain" crossOrigin="anonymous" />
+                                    </div>
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="flex justify-between items-start mb-8 avoid-break">
-                            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 min-w-[320px]">
-                                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Billed To Partner</h3>
-                                <p className="text-xl font-black text-slate-900 leading-none mb-2">{client.name}</p>
-                                <p className="text-sm font-bold text-slate-600 mono">{client.phone}</p>
+                            <div className="shrink-0 flex justify-between items-start mb-4 gap-4">
+                                <div className="flex flex-col text-slate-900 leading-tight">
+                                    <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Billed To Partner</h3>
+                                    <span className="text-[19px] font-black mb-1 tracking-tight">{client.name}</span>
+                                    <span className="text-[11px] font-semibold text-slate-600">{client.phone}</span>
+                                </div>
+                                <div className="text-right">
+                                    <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Payment Method</h3>
+                                    <span className={`text-[19px] font-black uppercase mt-1 block tracking-tight ${isCredit ? 'text-red-600' : 'text-blue-600'}`}>{client.paymentMethod}</span>
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="grid grid-cols-4 gap-4 mb-10 avoid-break">
-                            <div className="border border-slate-200 p-4 rounded-xl bg-white">
-                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Total Value</p>
-                                <p className="text-xl font-black text-slate-900">LKR {money(total)}</p>
-                            </div>
-                            <div className="border border-slate-200 p-4 rounded-xl bg-slate-50">
-                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Payment Terms</p>
-                                <p className={`text-xl font-black uppercase tracking-widest ${isCredit ? 'text-red-600' : 'text-blue-600'}`}>{client.paymentMethod}</p>
-                            </div>
-                            <div className="border border-slate-200 p-4 rounded-xl bg-slate-50">
-                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Amount Paid</p>
-                                <p className="text-xl font-black text-emerald-600">LKR {money(client.paymentAmount)}</p>
-                            </div>
-                            <div className="border-2 border-slate-900 p-4 rounded-xl bg-slate-900 text-white flex flex-col justify-center">
-                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Balance Due</p>
-                                <p className={`text-2xl font-black tracking-tightest ${balance > 0 ? "text-red-400" : "text-emerald-400"}`}>LKR {money(balance)}</p>
-                            </div>
-                        </div>
-
-                        <div className="avoid-break border border-slate-200 rounded-2xl p-6 mb-8 bg-white relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-600"></div>
-
-                            <div className="flex justify-between items-start mb-6">
+                            <div className="shrink-0 grid grid-cols-4 gap-4 border-t border-b border-slate-200 py-2.5 mb-5">
                                 <div>
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Items Breakdown</p>
-                                    <p className="text-lg mono font-black text-slate-900 tracking-tight">{items.length} Item(s)</p>
+                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Total Value</p>
+                                    <p className="text-[13px] font-black text-slate-900">LKR {money(total)}</p>
                                 </div>
-                                <img src={barcodeUrl} alt="Barcode" className="h-8 object-contain mix-blend-multiply opacity-80" crossOrigin="anonymous" />
+                                <div>
+                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Amount Paid</p>
+                                    <p className="text-[13px] font-black text-emerald-600">LKR {money(client.paymentAmount)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Balance Due</p>
+                                    <p className={`text-[13px] font-black ${balance > 0 ? "text-red-600" : "text-emerald-600"}`}>LKR {money(balance)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Total Items</p>
+                                    <p className="text-[13px] font-black text-slate-900">{items.length}</p>
+                                </div>
                             </div>
 
-                            <table className="w-full text-xs text-left mb-4">
-                                <thead className="text-[9px] uppercase tracking-widest text-slate-500 border-b border-slate-100">
-                                    <tr>
-                                        <th className="py-2 font-black w-[40%]">Item Description</th>
-                                        <th className="py-2 font-black w-[35%]">IMEI / Serial</th>
-                                        <th className="py-2 font-black text-center w-[5%]">Qty</th>
-                                        <th className="py-2 font-black text-right w-[20%]">Price</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {items.map((item, idx) => {
-                                        const qty = n(item.cartQty) || 1;
-                                        const price = n(item.finalPrice || item.Price || item.sellPrice || item.wholesalePrice || item.OfferPrice);
-                                        return (
-                                            <tr key={idx} className="avoid-break">
-                                                <td className="py-3 pr-2">
-                                                    <p className="font-bold text-slate-800 text-sm">{item.Brand} {item.Model}</p>
-                                                    {clean(item.warrantyText) && <p className="text-[9px] font-black text-slate-500 mt-1 uppercase tracking-widest">Warranty: {clean(item.warrantyText)}</p>}
-                                                </td>
-                                                <td className="py-3 mono text-[10px] text-slate-500 font-bold pr-2 break-all">{item.displayImei || item.IMEI}</td>
-                                                <td className="py-3 text-center font-bold text-slate-800 text-sm">{qty}</td>
-                                                <td className="py-3 text-right font-black text-slate-900 text-sm tracking-tight">LKR {money(price * qty)}</td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                            <div className="flex-1 min-h-[140px] w-full print-overflow-visible">
+                                <table className="w-full text-[10px] border-collapse">
+                                    <thead>
+                                        <tr className="border-b-2 border-slate-200 text-slate-900">
+                                            <th className="py-2 text-left font-black w-[40%] uppercase tracking-widest text-[8.5px] text-slate-500">Item Description</th>
+                                            <th className="py-2 text-left font-black w-[30%] uppercase tracking-widest text-[8.5px] text-slate-500">IMEI / Serial</th>
+                                            <th className="py-2 text-center font-black w-[5%] uppercase tracking-widest text-[8.5px] text-slate-500">Qty</th>
+                                            <th className="py-2 text-right font-black w-[25%] uppercase tracking-widest text-[8.5px] text-slate-500">Price (LKR)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {items.map((item, idx) => {
+                                            const qty = n(item.cartQty) || 1;
+                                            const price = n(item.finalPrice || item.Price || item.sellPrice || item.wholesalePrice || item.OfferPrice);
+                                            return (
+                                                <tr key={idx} className="border-b border-slate-100 align-top text-slate-900">
+                                                    <td className="py-2 pr-2">
+                                                        <div className="font-bold text-[12px] tracking-tight leading-tight">{item.Brand} {item.Model}</div>
+                                                        {clean(item.warrantyText) && <div className="text-[9px] text-slate-500 font-medium mt-0.5">Warranty: {clean(item.warrantyText)}</div>}
+                                                    </td>
+                                                    <td className="py-2 pr-2 font-mono text-[10.5px] break-all leading-tight font-semibold text-slate-700">{item.displayImei || item.IMEI}</td>
+                                                    <td className="py-2 text-center font-bold text-[12px]">{qty}</td>
+                                                    <td className="py-2 pl-2 text-right font-bold text-[12px] tracking-tight">{money(price * qty)}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
 
-                            <div className="flex justify-end pt-4 border-t border-slate-100">
-                                <div className="w-[240px]">
-                                    <div className="flex justify-between text-[11px] font-bold text-slate-500 mb-2">
-                                        <span>Subtotal</span><span>LKR {money(subTotal)}</span>
+                            <div className="shrink-0 flex justify-end mb-4 mt-4">
+                                <div className="w-64 border-t-2 border-slate-900 pt-2">
+                                    <div className="flex justify-between text-[11.5px] font-medium text-slate-600 mb-1">
+                                        <span className="uppercase tracking-widest text-[9px] font-bold text-slate-400">Subtotal:</span>
+                                        <span className="font-bold text-slate-900">LKR {money(subTotal)}</span>
                                     </div>
                                     {discount > 0 && (
-                                        <div className="flex justify-between text-[11px] font-bold text-red-500 mb-2">
-                                            <span>Discount</span><span>- LKR {money(discount)}</span>
+                                        <div className="flex justify-between text-[11.5px] font-bold text-red-500 mb-1">
+                                            <span className="uppercase tracking-widest text-[9px]">Discount:</span>
+                                            <span>- LKR {money(discount)}</span>
                                         </div>
                                     )}
-                                    <div className="flex justify-between text-base font-black text-slate-900 pt-2 border-t border-slate-900">
-                                        <span>TOTAL</span><span>LKR {money(total)}</span>
+                                    <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-slate-200">
+                                        <span className="text-[10.5px] font-black text-slate-900 uppercase tracking-widest">Total:</span>
+                                        <span className="text-[17px] font-black text-slate-900 tracking-tighter">LKR {money(total)}</span>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="avoid-break">
-                            <div className="grid grid-cols-2 gap-16 mt-20">
-                                <div className="border-t-[3px] border-slate-300 pt-3 text-center"><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Customer Signature</p></div>
-                                <div className="border-t-[3px] border-slate-300 pt-3 text-center"><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Authorized ICON MOBILE Signature</p></div>
-                            </div>
-                            <div className="mt-12 pt-6 border-t border-slate-200 text-center pb-4">
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">System generated strictly from local master ledger data. © ICON MOBILE.</p>
+                            <div className="shrink-0 flex flex-row print-row gap-8 mt-auto text-[9px] text-slate-800 items-end pt-3 border-t border-slate-100">
+                                <div className="w-[45%] print-w-45 flex flex-col justify-end">
+                                    <img src={barcodeUrl} alt="Barcode" className="h-8 object-contain mb-3 opacity-80" crossOrigin="anonymous" />
+                                    <div className="flex gap-8">
+                                        <div className="flex-1 border-t border-slate-400 pt-1.5 text-center"><span className="font-black text-[8px] text-slate-400 uppercase tracking-widest">Partner Signature</span></div>
+                                        <div className="flex-1 border-t border-slate-400 pt-1.5 text-center"><span className="font-black text-[8px] text-slate-400 uppercase tracking-widest">Authorized Signature</span></div>
+                                    </div>
+                                </div>
+                                <div className="w-[55%] print-w-55 flex items-end justify-end">
+                                    <p className="text-[6.5px] font-black text-slate-400 uppercase tracking-widest text-right leading-relaxed">System generated strictly from local master ledger data.<br />© ICON MOBILE.</p>
+                                </div>
                             </div>
                         </div>
                     </div>
