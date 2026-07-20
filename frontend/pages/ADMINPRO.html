@@ -1064,7 +1064,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
             const handleLogout = async () => {
                 try { await window.IconAPI.logout(); }
                 catch (error) { console.warn('Server logout failed:', error); }
-                finally { setIsLoggedIn(false); }
+                finally { setIsLoggedIn(false); window.location.href = '/index.html'; }
             };
 
             const dynamicSuppliers = useMemo(() => {
