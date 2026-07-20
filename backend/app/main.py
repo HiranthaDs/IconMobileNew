@@ -738,6 +738,7 @@ STATIC_FILES = {
     "/settings.html": "settings.html",
     "/scanner.html": "scanner.html",
     "/B2Binvoice.html": "B2Binvoice.html",
+    "/B2Bbill.html": "B2Bbill.html",
 }
 
 

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ICON MOBILE - B2B Digital Invoice</title>
+
+    <link rel="stylesheet" href="/assets/css/app.css">
+    <script src="/assets/js/vendor/react.production.min.js"></script>
+    <script src="/assets/js/vendor/react-dom.production.min.js"></script>
+    <script src="/assets/js/vendor/babel.min.js"></script>
+    <script src="/assets/js/local-api.js"></script>
+
+    <style>
+        :root { --bg:#f8fafc; --ink:#0f172a; }
+        * { box-sizing:border-box; }
+        body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,sans-serif; -webkit-font-smoothing:antialiased; }
+        .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; border-radius:12px; font-weight:800; transition:.15s; cursor:pointer; }
+        .btn:hover { transform:translateY(-1px); }
+        .fade-in { animation:fadeIn .2s ease-out both; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .mono { font-family:'JetBrains Mono', monospace; }
+        .tracking-tightest { letter-spacing: -0.04em; }
+        @page { size: A4 portrait; margin: 12mm 0; }
+        .a4-container { width: min(210mm, calc(100vw - 24px)); min-height: 297mm; margin: 100px auto 48px; padding: 15mm; background:#fff; box-sizing:border-box; box-shadow:0 24px 70px rgba(15,23,42,.14); border:1px solid #e2e8f0; position: relative; overflow: hidden; }
+        @media print {
+            html, body, #root { width:100% !important; height:auto !important; min-height:0 !important; overflow:visible !important; background:#fff !important; margin:0; padding:0; }
+            .no-print { display:none !important; visibility:hidden !important; }
+            body * { visibility:hidden !important; }
+            #printable-document, #printable-document * { visibility:visible !important; }
+            #printable-document {
+                position:absolute !important; left:0 !important; top:0 !important;
+                width:210mm !important; min-height:297mm !important; margin:0 auto !important; padding:0 15mm !important;
+                background:#fff !important; box-shadow:none !important; border:none !important; overflow:visible !important;
+            }
+            .avoid-break { break-inside: avoid; page-break-inside: avoid; }
+            table { border-collapse: collapse; page-break-inside: auto; }
+            tr { break-inside: avoid; page-break-inside: avoid; page-break-after: auto; }
+            thead { display: table-header-group; }
+            * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+        }
+        .boot-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at top left, #e0f2fe 0, transparent 36%), radial-gradient(circle at bottom right, #dbeafe 0, transparent 34%), #f8fafc; padding:24px; }
+        .boot-card { width:min(420px, 100%); background:rgba(255,255,255,.78); border:1px solid rgba(255,255,255,.72); border-radius:34px; padding:34px; box-shadow:0 30px 90px rgba(15,23,42,.16); backdrop-filter:blur(24px) saturate(180%); text-align:center; }
+        .boot-spinner { width:48px; height:48px; border-radius:999px; border:4px solid rgba(37,99,235,.12); border-top-color:#2563eb; animation:spin .9s linear infinite; margin:0 auto 18px; }
+        @keyframes spin { to { transform:rotate(360deg); } }
+        .apple-panel { background:rgba(255,255,255,.9); border:1px solid rgba(255,255,255,.8); box-shadow:0 30px 90px rgba(15,23,42,.15); backdrop-filter:blur(24px) saturate(180%); }
+    </style>
+</head>
+<body>
+    <div id="root" class="w-full h-full">
+    <div class="boot-screen">
+      <div class="boot-card">
+        <div class="boot-spinner"></div>
+        <h1 style="font-size:22px;font-weight:900;letter-spacing:-.04em;margin:0;color:#0f172a;">ICON MOBILE ERP</h1>
+        <p style="font-size:13px;font-weight:700;color:#64748b;margin:8px 0 0;line-height:1.5;">Loading system safely...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      window.__ICON_BOOT_ERROR__ = function(message){
+        var root = document.getElementById('root');
+        if (!root) return;
+        var safe = String(message || 'Unknown startup error').replace(/[<>&]/g, function(c){ return ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]); });
+        root.innerHTML = '<div class="boot-screen"><div class="boot-card"><div style="width:56px;height:56px;border-radius:22px;background:#fee2e2;color:#dc2626;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-weight:900;font-size:24px;">!</div><h1 style="font-size:22px;font-weight:900;margin:0;color:#0f172a;">Application could not start</h1><p style="font-size:13px;font-weight:700;color:#64748b;margin:10px 0 0;line-height:1.55;">'+ safe +'</p></div></div>';
+      };
+      window.addEventListener('error', function(e){
+        if (!document.body.classList.contains('app-mounted')) window.__ICON_BOOT_ERROR__(e.message || 'Startup script error');
+      });
+      window.addEventListener('unhandledrejection', function(e){
+        if (!document.body.classList.contains('app-mounted')) window.__ICON_BOOT_ERROR__((e.reason && (e.reason.stack || e.reason.message || e.reason)) || 'Startup promise error');
+      });
+      setTimeout(function(){
+        if (!document.body.classList.contains('app-mounted')) {
+          var root = document.getElementById('root');
+          if (root && /Loading/i.test(root.textContent || '')) window.__ICON_BOOT_ERROR__('The app is taking too long to start.');
+        }
+      }, 18000);
+    })();
+  </script>
+
+  <script type="text/babel">
+try {
+if (!window.React || !window.ReactDOM) { throw new Error('Local React assets did not load.'); }
+if (!window.Babel) { throw new Error('Local Babel asset did not load.'); }
+if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
+
+        const { useState, useEffect, useCallback } = React;
+        const clean = (value) => String(value !== null && value !== void 0 ? value : "").trim();
+        const n = (value) => { const x = parseFloat(value); return Number.isFinite(x) ? x : 0; };
+        const money = (value) => Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
+
+        const Icons = {
+            Print: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>,
+            Alert: () => <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-500"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+        };
+
+        class ErrorBoundary extends React.Component {
+            constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+            static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+                            <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-lg border border-red-200 text-center">
+                                <div className="flex justify-center mb-4"><Icons.Alert /></div>
+                                <h2 className="text-xl font-black text-gray-900 mb-2">Rendering Error</h2>
+                                <div className="bg-gray-50 p-4 rounded-lg overflow-x-auto text-xs font-mono text-red-600 text-left mb-6">{this.state.error?.toString()}</div>
+                                <button onClick={() => window.location.reload()} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md">Reload Page</button>
+                            </div>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        const normalizeInvoiceRecord = (record) => {
+            if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
+            const nested = record.client && typeof record.client === 'object' ? record.client : {};
+            let items = record.items || record.purchasedItems || nested.items || nested.purchasedItems || [];
+            if (typeof items === 'string') { try { items = JSON.parse(items); } catch (e) { items = []; } }
+            if (!Array.isArray(items)) items = [];
+            const invoiceId = String(record.invoiceId || nested.invoiceId || record.id || '').trim();
+            if (!invoiceId) return null;
+            return {
+                ...record,
+                invoiceId,
+                client: { ...nested, name: nested.name || record.name || 'Partner', phone: nested.phone || record.phone || '' },
+                items,
+            };
+        };
+
+        const App = () => {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState("");
+
+            const fetchInvoice = useCallback(async (silent = false) => {
+                if (!silent) { setLoading(true); setError(""); }
+                const urlParams = new URLSearchParams(window.location.search);
+                const targetId = String(urlParams.get('id') || urlParams.get('invoice') || urlParams.get('invoiceId') || '').trim();
+                if (!targetId) {
+                    if (!silent) { setError("No Invoice ID provided in the link."); setLoading(false); }
+                    return;
+                }
+                try {
+                    const result = await window.IconAPI.getInvoice(targetId);
+                    if (!result || result.success !== true) throw new Error(result?.error || result?.message || 'Invoice request failed.');
+                    const payload = result.data || {};
+                    const found = payload.transaction || payload.invoice || payload;
+                    const normalized = normalizeInvoiceRecord(found);
+                    if (!normalized) throw new Error(`Invoice ${targetId} could not be found.`);
+                    setData(normalized);
+                    document.title = `B2B_Invoice_${normalized.invoiceId}`;
+                } catch (e) {
+                    console.error('B2B invoice load failed:', e);
+                    setError(e?.code === 'invoice_not_found'
+                        ? `Invoice ${targetId} was not found. It may have been deleted by an administrator.`
+                        : `Failed to load this invoice: ${e.message || e}`);
+                }
+                if (!silent) setLoading(false);
+            }, []);
+
+            useEffect(() => { fetchInvoice(false); }, [fetchInvoice]);
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6">
+                        <div className="w-12 h-12 border border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                        <p className="text-gray-900 font-bold text-sm tracking-wide">Loading Official Document...</p>
+                    </div>
+                );
+            }
+
+            if (error || !data) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
+                        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-gray-200">
+                            <div className="flex justify-center mb-4"><Icons.Alert /></div>
+                            <h2 className="text-xl font-black text-gray-900 mb-2">Document Not Found</h2>
+                            <p className="text-gray-500 text-sm mb-6 leading-relaxed font-medium">{error}</p>
+                            <button onClick={() => fetchInvoice(false)} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-md">Try Again</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            const { client, items, invoiceId, transactionType } = data;
+            const total = n(data.total);
+            const subTotal = n(data.subTotal);
+            const discount = n(data.discount);
+            const dateText = data.date ? new Date(data.date).toLocaleString() : "";
+            const docTitle = transactionType === "Return" ? "RETURN RECEIPT" : "B2B INVOICE";
+            const isCredit = client.paymentMethod && client.paymentMethod.toLowerCase().includes('credit');
+            const balance = total - n(client.paymentAmount);
+
+            const pageLink = window.IconAPI.getShareUrl(`/B2Bbill.html?id=${encodeURIComponent(invoiceId)}`);
+            const qrUrl = window.IconAPI.apiUrl(`/api/v1/qr?size=150&data=${encodeURIComponent(pageLink)}`);
+            const barcodeUrl = window.IconAPI.apiUrl(`/api/v1/barcode?text=${encodeURIComponent(invoiceId)}`);
+
+            return (
+                <div className="min-h-screen bg-slate-100 flex flex-col items-center pb-20">
+                    <div className="fixed inset-x-0 top-4 z-50 no-print flex justify-center px-4 pointer-events-none">
+                        <div className="pointer-events-auto apple-panel rounded-[24px] p-4 w-full max-w-md shadow-[0_20px_60px_rgba(0,0,0,0.1)] flex items-center justify-between gap-4">
+                            <p className="text-slate-500 text-xs font-semibold">Official Digital Document</p>
+                            <button type="button" onClick={() => window.print()} className="btn px-5 py-2.5 bg-slate-900 hover:bg-black text-white font-black uppercase tracking-widest text-[10px]"><Icons.Print /> Save PDF</button>
+                        </div>
+                    </div>
+
+                    <div id="printable-document" className="a4-container fade-in text-[13px] text-slate-900 leading-normal">
+                        <div className="flex justify-between items-start border-b-[3px] border-slate-900 pb-6 mb-8 avoid-break">
+                            <div>
+                                <h1 className="text-4xl font-black text-slate-900 tracking-tighter mb-1">ICON MOBILE</h1>
+                                <p className="text-[11px] text-slate-600 font-black uppercase tracking-widest">B2B Wholesale Division</p>
+                                <p className="text-[11px] text-slate-500 font-bold mt-4">No:59, First Floor, Liberty Plaza, Colombo 03</p>
+                                <p className="text-[11px] text-slate-500 font-bold mt-0.5">0772729226 / 0701442299</p>
+                            </div>
+                            <div className="text-right flex flex-col items-end">
+                                <h2 className="text-3xl font-black text-blue-600 tracking-tight uppercase mb-3">{docTitle}</h2>
+                                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px] text-slate-700 text-left w-fit ml-auto mb-4">
+                                    <span className="font-black text-slate-500 uppercase tracking-widest text-[10px] self-center">Inv No:</span>
+                                    <span className="font-black text-slate-900 text-lg">{invoiceId}</span>
+                                    <span className="font-black text-slate-500 uppercase tracking-widest text-[10px] self-center">Date:</span>
+                                    <span className="font-black text-slate-900">{dateText}</span>
+                                </div>
+                                <img src={qrUrl} alt="Digital Invoice QR" className="w-16 h-16 rounded border border-slate-100 p-1 object-cover mix-blend-multiply" crossOrigin="anonymous" />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-between items-start mb-8 avoid-break">
+                            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 min-w-[320px]">
+                                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Billed To Partner</h3>
+                                <p className="text-xl font-black text-slate-900 leading-none mb-2">{client.name}</p>
+                                <p className="text-sm font-bold text-slate-600 mono">{client.phone}</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-4 mb-10 avoid-break">
+                            <div className="border border-slate-200 p-4 rounded-xl bg-white">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Total Value</p>
+                                <p className="text-xl font-black text-slate-900">LKR {money(total)}</p>
+                            </div>
+                            <div className="border border-slate-200 p-4 rounded-xl bg-slate-50">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Payment Terms</p>
+                                <p className={`text-xl font-black uppercase tracking-widest ${isCredit ? 'text-red-600' : 'text-blue-600'}`}>{client.paymentMethod}</p>
+                            </div>
+                            <div className="border border-slate-200 p-4 rounded-xl bg-slate-50">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Amount Paid</p>
+                                <p className="text-xl font-black text-emerald-600">LKR {money(client.paymentAmount)}</p>
+                            </div>
+                            <div className="border-2 border-slate-900 p-4 rounded-xl bg-slate-900 text-white flex flex-col justify-center">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Balance Due</p>
+                                <p className={`text-2xl font-black tracking-tightest ${balance > 0 ? "text-red-400" : "text-emerald-400"}`}>LKR {money(balance)}</p>
+                            </div>
+                        </div>
+
+                        <div className="avoid-break border border-slate-200 rounded-2xl p-6 mb-8 bg-white relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-600"></div>
+
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Items Breakdown</p>
+                                    <p className="text-lg mono font-black text-slate-900 tracking-tight">{items.length} Item(s)</p>
+                                </div>
+                                <img src={barcodeUrl} alt="Barcode" className="h-8 object-contain mix-blend-multiply opacity-80" crossOrigin="anonymous" />
+                            </div>
+
+                            <table className="w-full text-xs text-left mb-4">
+                                <thead className="text-[9px] uppercase tracking-widest text-slate-500 border-b border-slate-100">
+                                    <tr>
+                                        <th className="py-2 font-black w-[40%]">Item Description</th>
+                                        <th className="py-2 font-black w-[35%]">IMEI / Serial</th>
+                                        <th className="py-2 font-black text-center w-[5%]">Qty</th>
+                                        <th className="py-2 font-black text-right w-[20%]">Price</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {items.map((item, idx) => {
+                                        const qty = n(item.cartQty) || 1;
+                                        const price = n(item.finalPrice || item.Price || item.sellPrice || item.wholesalePrice || item.OfferPrice);
+                                        return (
+                                            <tr key={idx} className="avoid-break">
+                                                <td className="py-3 pr-2">
+                                                    <p className="font-bold text-slate-800 text-sm">{item.Brand} {item.Model}</p>
+                                                    {clean(item.warrantyText) && <p className="text-[9px] font-black text-slate-500 mt-1 uppercase tracking-widest">Warranty: {clean(item.warrantyText)}</p>}
+                                                </td>
+                                                <td className="py-3 mono text-[10px] text-slate-500 font-bold pr-2 break-all">{item.displayImei || item.IMEI}</td>
+                                                <td className="py-3 text-center font-bold text-slate-800 text-sm">{qty}</td>
+                                                <td className="py-3 text-right font-black text-slate-900 text-sm tracking-tight">LKR {money(price * qty)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+
+                            <div className="flex justify-end pt-4 border-t border-slate-100">
+                                <div className="w-[240px]">
+                                    <div className="flex justify-between text-[11px] font-bold text-slate-500 mb-2">
+                                        <span>Subtotal</span><span>LKR {money(subTotal)}</span>
+                                    </div>
+                                    {discount > 0 && (
+                                        <div className="flex justify-between text-[11px] font-bold text-red-500 mb-2">
+                                            <span>Discount</span><span>- LKR {money(discount)}</span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between text-base font-black text-slate-900 pt-2 border-t border-slate-900">
+                                        <span>TOTAL</span><span>LKR {money(total)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="avoid-break">
+                            <div className="grid grid-cols-2 gap-16 mt-20">
+                                <div className="border-t-[3px] border-slate-300 pt-3 text-center"><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Customer Signature</p></div>
+                                <div className="border-t-[3px] border-slate-300 pt-3 text-center"><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Authorized ICON MOBILE Signature</p></div>
+                            </div>
+                            <div className="mt-12 pt-6 border-t border-slate-200 text-center pb-4">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">System generated strictly from local master ledger data. © ICON MOBILE.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const mountNode = document.getElementById('root');
+        if (!mountNode) throw new Error('Root element #root was not found.');
+        if (ReactDOM.createRoot) {
+            ReactDOM.createRoot(mountNode).render(<ErrorBoundary><App /></ErrorBoundary>);
+        } else {
+            ReactDOM.render(<ErrorBoundary><App /></ErrorBoundary>, mountNode);
+        }
+        document.body.classList.add('app-mounted');
+
+} catch (err) {
+  if (window.__ICON_BOOT_ERROR__) window.__ICON_BOOT_ERROR__(err && (err.stack || err.message) || err);
+  else throw err;
+}
+</script>
+</body>
+</html>

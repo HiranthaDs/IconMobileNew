@@ -20,7 +20,6 @@
   const API_ROOT = `${API_BASE}/api/v1`;
   const DEVICE_KEY = "ICON_MOBILE_DEVICE_ID_V1";
   const SNAPSHOT_KEY = "ICON_MOBILE_LOCAL_SNAPSHOT_V1";
-  const SHARE_BASE_KEY = "ICON_MOBILE_LAN_SHARE_BASE_V1";
   const BACKUP_REMINDER_KEY = "ICON_MOBILE_BACKUP_REMINDER_SHOWN_V1";
   const REQUEST_TIMEOUT_MS = 20000;
   const subscribers = new Set();
@@ -31,6 +30,18 @@
   function isLoopbackHost(hostname) {
     const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
     return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  }
+
+  // Links shared outside this device (WhatsApp receipts, invoice QR codes) must
+  // always be reachable from the public internet. A private/loopback address
+  // only works for other devices on the same LAN as the host computer, so any
+  // link generated while viewing the app from one of these must fall back to
+  // the known-public backend origin instead.
+  function isPrivateHost(hostname) {
+    const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+    if (isLoopbackHost(host)) return true;
+    if (host.endsWith(".local")) return true;
+    return /^(10\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
   }
 
   function currentHostedOrigin() {
@@ -44,13 +55,7 @@
   let pollTimer = null;
   let manuallyStopped = false;
   let snapshotRequest = null;
-  // A public/reverse-proxy hostname must never be replaced by a private LAN IP.
-  // The LAN address is useful only when the host computer opened the app through
-  // localhost and needs to share a link with another device on the same network.
   const runtimeOrigin = currentHostedOrigin();
-  let shareBaseUrl = isLoopbackHost(window.location.hostname)
-    ? (storageGet(SHARE_BASE_KEY, "") || runtimeOrigin)
-    : runtimeOrigin;
 
   function storageGet(key, fallback) {
     try {
@@ -181,13 +186,6 @@
       data: snapshot
     };
     knownRevision = Math.max(knownRevision, envelope.revision);
-    if (snapshot.lanBaseUrl && isLoopbackHost(window.location.hostname)) {
-      shareBaseUrl = String(snapshot.lanBaseUrl).replace(/\/$/, "");
-      storageSet(SHARE_BASE_KEY, shareBaseUrl);
-    } else if (runtimeOrigin) {
-      shareBaseUrl = runtimeOrigin;
-      storageSet(SHARE_BASE_KEY, runtimeOrigin);
-    }
     return storageSet(SNAPSHOT_KEY, JSON.stringify(envelope));
   }
 
@@ -208,11 +206,7 @@
 
   function getShareUrl(path) {
     const suffix = String(path || "");
-    const base = (
-      isLoopbackHost(window.location.hostname)
-        ? (shareBaseUrl || runtimeOrigin)
-        : runtimeOrigin
-    ).replace(/\/$/, "");
+    const base = (isPrivateHost(window.location.hostname) ? BACKEND_ORIGIN : runtimeOrigin).replace(/\/$/, "");
     return `${base}${suffix.startsWith("/") ? suffix : `/${suffix}`}`;
   }
 

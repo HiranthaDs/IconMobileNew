@@ -264,6 +264,10 @@ function getPartnerInvoiceLink(name, invoiceId) {
     const base = getPartnerStatementLink(name);
     return `${base}&invoice=${encodeURIComponent(invoiceId || "")}`;
 }
+// Single B2B invoice document, public (no login) — dedicated B2B-styled viewer.
+function getPartnerInvoiceDocumentLink(invoiceId) {
+    return window.IconAPI.getShareUrl(`/B2Bbill.html?id=${encodeURIComponent(invoiceId || "")}`);
+}
 function openStatementWindow(name, invoiceId = "") {
     const url = invoiceId ? getPartnerInvoiceLink(name, invoiceId) : getPartnerStatementLink(name);
     window.open(url, "_blank", "noopener,noreferrer");
@@ -883,13 +887,13 @@ function CartEditModal({ item, onSave, onClose }) {
     );
 }
 
-function CheckoutModal({ data, cart, totals, onClose, onConfirm, actionLoading, showToast }) {
+function CheckoutModal({ data, cart, totals, invoiceId, onClose, onConfirm, actionLoading, showToast }) {
     const [partnerName, setPartnerName] = useState(""); const [partnerPhone, setPartnerPhone] = useState("");
     const [paymentMethod, setPaymentMethod] = useState("Credit"); const [paymentAmount, setPaymentAmount] = useState("0");
     const [invoiceNote, setInvoiceNote] = useState("");
     const selectedPartner = (data.ledger || []).find(p => norm(p.name) === norm(partnerName));
     const balance = totals.total - n(paymentAmount);
-    const statementLink = getPartnerStatementLink(partnerName);
+    const invoiceLink = getPartnerInvoiceDocumentLink(invoiceId);
 
     const buildMessage = () => {
         let msg = `🏢 *ICON MOBILE B2B*\n----------------------------\n`;
@@ -909,7 +913,7 @@ function CheckoutModal({ data, cart, totals, onClose, onConfirm, actionLoading, 
         msg += `📉 *Invoice Balance:* LKR ${money(balance)}\n`;
         if (selectedPartner) msg += `📊 *Total Account Balance:* LKR ${money(Math.max(0, selectedPartner.globalBalance + Math.max(0, balance)))}\n`;
         msg += `----------------------------\n\n`;
-        msg += `📄 *View Digital Statement:*\n${statementLink}\n\nThank you for your business!`;
+        msg += `📄 *View Digital Invoice:*\n${invoiceLink}\n\nThank you for your business!`;
         return msg;
     };
     const message = buildMessage();
@@ -973,6 +977,7 @@ function POSView({ data, onCheckout, actionLoading, showToast }) {
     const [globalDiscount, setGlobalDiscount] = useState("0");
     const [unitPickerProduct, setUnitPickerProduct] = useState(null); const [editItem, setEditItem] = useState(null);
     const [checkoutOpen, setCheckoutOpen] = useState(false); const [discountOpen, setDiscountOpen] = useState(false);
+    const [pendingInvoiceId, setPendingInvoiceId] = useState("");
     const [discountDraft, setDiscountDraft] = useState("0"); const [discountMode, setDiscountMode] = useState("fixed");
     const [isConfirmingClear, setIsConfirmingClear] = useState(false);
 
@@ -1052,7 +1057,7 @@ function POSView({ data, onCheckout, actionLoading, showToast }) {
     const applyGlobalDiscount = () => { const raw = n(discountDraft); const value = discountMode === "percent" ? Math.round((subTotal * raw) / 100) : raw; setGlobalDiscount(String(Math.max(0, value))); setDiscountOpen(false); };
 
     const confirmInvoice = async (checkout) => {
-        const invoiceId = uid("B2B");
+        const invoiceId = pendingInvoiceId || uid("B2B");
         const payloadItems = cart.map(i => {
             const warrantyText = itemWarrantyText(i);
             const itemPayload = {
@@ -1179,14 +1184,14 @@ function POSView({ data, onCheckout, actionLoading, showToast }) {
                         {discount > 0 && <div className="flex justify-between text-red-500"><span>Discounts</span><span>- LKR {money(discount)}</span></div>}
                         <div className="flex justify-between items-end pt-3 border-t border-slate-200"><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Grand Total</span><span className="text-3xl font-black text-blue-600 tracking-tighter leading-none">LKR {money(total)}</span></div>
                     </div>
-                    <button type="button" onClick={() => { if (!cart.length) return showToast("Cart is empty", "warn"); setCheckoutOpen(true); }} disabled={actionLoading || cart.length === 0} className="w-full bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-black py-4 rounded-[16px] shadow-[0_8px_20px_rgba(37,99,235,0.4)] transition-all text-xs uppercase tracking-widest disabled:opacity-50 border border-blue-500">Proceed to Checkout</button>
+                    <button type="button" onClick={() => { if (!cart.length) return showToast("Cart is empty", "warn"); setPendingInvoiceId(uid("B2B")); setCheckoutOpen(true); }} disabled={actionLoading || cart.length === 0} className="w-full bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-black py-4 rounded-[16px] shadow-[0_8px_20px_rgba(37,99,235,0.4)] transition-all text-xs uppercase tracking-widest disabled:opacity-50 border border-blue-500">Proceed to Checkout</button>
                     <button type="button" onClick={() => setIsConfirmingClear(true)} disabled={cart.length === 0} className="w-full mt-3 text-slate-400 hover:text-red-600 hover:bg-red-50 font-black py-2.5 rounded-xl text-[10px] transition-colors disabled:opacity-40 tracking-widest uppercase">Cancel Order</button>
                 </div>
             </div>
             
             {unitPickerProduct && <UnitPickerModal product={unitPickerProduct} onClose={() => setUnitPickerProduct(null)} onAdd={addToCart} />}
             {editItem && <CartEditModal item={editItem} onClose={() => setEditItem(null)} onSave={updateCartItem} />}
-            {checkoutOpen && <CheckoutModal data={data} cart={cart} totals={{ subTotal, discount, total, profit }} onClose={() => setCheckoutOpen(false)} onConfirm={confirmInvoice} actionLoading={actionLoading} showToast={showToast} />}
+            {checkoutOpen && <CheckoutModal data={data} cart={cart} totals={{ subTotal, discount, total, profit }} invoiceId={pendingInvoiceId} onClose={() => setCheckoutOpen(false)} onConfirm={confirmInvoice} actionLoading={actionLoading} showToast={showToast} />}
             {isConfirmingClear && <ConfirmModal title="Clear Entire Cart?" message="Are you sure you want to completely erase this pending order? This cannot be undone." onConfirm={clearDraft} onClose={() => setIsConfirmingClear(false)} />}
             {discountOpen && (
                 <Modal title="Global Discount" onClose={() => setDiscountOpen(false)} width="max-w-sm">
@@ -1855,8 +1860,8 @@ function PrintableInvoice({ data, onDone }) {
     const isCredit = client.paymentMethod && client.paymentMethod.toLowerCase().includes('credit');
     const balance = total - n(client.paymentAmount);
     
-    const statementLink = getPartnerStatementLink(client.name);
-    const qrUrl = window.IconAPI.apiUrl(`/api/v1/qr?size=150&data=${encodeURIComponent(statementLink)}`);
+    const invoiceLink = getPartnerInvoiceDocumentLink(invoiceId);
+    const qrUrl = window.IconAPI.apiUrl(`/api/v1/qr?size=150&data=${encodeURIComponent(invoiceLink)}`);
     const barcodeUrl = window.IconAPI.apiUrl(`/api/v1/barcode?text=${encodeURIComponent(invoiceId)}`);
 
     return (
@@ -1903,7 +1908,7 @@ function PrintableInvoice({ data, onDone }) {
                             <span className="font-black text-slate-500 uppercase tracking-widest text-[10px] self-center">Date:</span>
                             <span className="font-black text-slate-900">{date}</span>
                         </div>
-                        <img src={qrUrl} alt="Digital Statement QR" className="w-16 h-16 rounded border border-slate-100 p-1 object-cover mix-blend-multiply" crossOrigin="anonymous" />
+                        <img src={qrUrl} alt="Digital Invoice QR" className="w-16 h-16 rounded border border-slate-100 p-1 object-cover mix-blend-multiply" crossOrigin="anonymous" />
                     </div>
                 </div>
 
