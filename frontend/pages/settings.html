@@ -107,9 +107,9 @@
       <article class="card">
         <div class="card-head"><div><h2>CSV exports</h2><p class="muted">Excel-friendly copies for reports. SQLite backup remains the complete restore format.</p></div></div>
         <div class="actions">
-          <a class="button" href="/api/v1/export/inventory.csv">Inventory CSV</a>
-          <a class="button" href="/api/v1/export/clients.csv">Clients CSV</a>
-          <a class="button" href="/api/v1/export/transactions.csv">Transactions CSV</a>
+          <a class="button" id="exportInventory" href="/api/v1/export/inventory.csv">Inventory CSV</a>
+          <a class="button" id="exportClients" href="/api/v1/export/clients.csv">Clients CSV</a>
+          <a class="button" id="exportTransactions" href="/api/v1/export/transactions.csv">Transactions CSV</a>
         </div>
       </article>
 
@@ -147,6 +147,9 @@
       const $ = id => document.getElementById(id);
       let busy = false;
       let refreshTimer = null;
+      $("exportInventory").href = IconAPI.apiUrl("/api/v1/export/inventory.csv");
+      $("exportClients").href = IconAPI.apiUrl("/api/v1/export/clients.csv");
+      $("exportTransactions").href = IconAPI.apiUrl("/api/v1/export/transactions.csv");
       const goBack = () => { try { const previous=new URL(document.referrer); if(previous.origin===location.origin && previous.pathname!==location.pathname){ history.back(); return; } }catch(_){ } location.href="/ADMINPRO.html"; };
       document.querySelectorAll(".settingsBack").forEach(button => button.addEventListener("click", goBack));
       const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
@@ -175,7 +178,7 @@
           $("autoHours").value=String(data.settings.automaticBackupIntervalHours);
           const connections=data.connections;
           $("connectionBadge").textContent=`${connections.devices} device${connections.devices===1?"":"s"} live`;
-          $("lanUrls").innerHTML=(data.lanUrls||[]).map(url=>`<div class="url-row"><code>${esc(url)}</code><button data-copy="${esc(url)}">Copy</button><img src="/api/v1/qr?size=88&data=${encodeURIComponent(url)}" width="54" height="54" alt="LAN QR"></div>`).join("") || '<p class="muted">No private LAN address was detected. Check the computer network connection.</p>';
+          $("lanUrls").innerHTML=(data.lanUrls||[]).map(url=>`<div class="url-row"><code>${esc(url)}</code><button data-copy="${esc(url)}">Copy</button><img src="${IconAPI.apiUrl(`/api/v1/qr?size=88&data=${encodeURIComponent(url)}`)}" width="54" height="54" alt="LAN QR"></div>`).join("") || '<p class="muted">No private LAN address was detected. Check the computer network connection.</p>';
           $("devices").innerHTML=connections.items.length ? `<h2>Live connections</h2>${connections.items.map(item=>`<div class="device"><span><strong>${esc(item.ip)}</strong><br><span class="muted">${esc(item.deviceId)}</span></span><span class="muted">Since ${esc(dateText(item.connectedAt))}</span></div>`).join("")}` : '<p class="muted">No browser sync connection is active yet.</p>';
           $("backupHistory").innerHTML=data.backups.length ? data.backups.map(item=>`<div class="backup-row"><span><strong>${esc(item.filename)}</strong><br><span class="muted">${esc(dateText(item.createdAt))}</span></span><span>${esc(sizeText(item.size))}</span></div>`).join("") : '<p class="muted">No local backup snapshots yet.</p>';
           document.querySelectorAll("[data-copy]").forEach(button=>button.onclick=()=>navigator.clipboard.writeText(button.dataset.copy).then(()=>toast("LAN address copied.")));
@@ -187,7 +190,7 @@
       }
 
       async function fetchBackup() {
-        const response=await fetch("/api/v1/backup",{credentials:"same-origin",cache:"no-store"});
+        const response=await fetch(IconAPI.apiUrl("/api/v1/backup"),{credentials:IconAPI.apiBase?"include":"same-origin",cache:"no-store"});
         if(!response.ok){ let value={}; try{value=await response.json();}catch(_){ } throw new Error(value.error||`Backup failed (${response.status})`); }
         const blob=await response.blob();
         const header=response.headers.get("content-disposition")||"";

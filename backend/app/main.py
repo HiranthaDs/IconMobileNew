@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -50,6 +51,10 @@ HOST = os.environ.get("ICON_HOST", "0.0.0.0")
 PORT = int(os.environ.get("ICON_PORT", "8000"))
 MAX_REQUEST_BYTES = max(64 * 1024, int(os.environ.get("MAX_REQUEST_BYTES", str(5 * 1024 * 1024))))
 MAX_RESTORE_BYTES = max(MAX_REQUEST_BYTES, int(os.environ.get("MAX_RESTORE_BYTES", str(512 * 1024 * 1024))))
+# Set when the frontend is hosted on a different origin than this API (e.g. a
+# separate static site service). Comma-separated list of exact origins, no
+# trailing slash, e.g. "https://iconmobilenew.onrender.com".
+ALLOWED_ORIGINS = [origin.strip().rstrip("/") for origin in os.environ.get("ALLOWED_ORIGINS", "").split(",") if origin.strip()]
 BACKUP_DIR = Path(os.environ.get("ICON_BACKUP_DIR", str(PROJECT_ROOT / "_backups")))
 if not BACKUP_DIR.is_absolute():
     BACKUP_DIR = (PROJECT_ROOT / BACKUP_DIR).resolve()
@@ -67,6 +72,15 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 class LiveConnectionRegistry:
@@ -179,6 +193,8 @@ def _same_origin(request: Request) -> bool:
     origin = request.headers.get("origin", "").rstrip("/")
     if not origin:
         return True
+    if origin in ALLOWED_ORIGINS:
+        return True
     expected = f"{request.url.scheme}://{request.headers.get('host', '')}".rstrip("/")
     return origin == expected
 
@@ -282,13 +298,14 @@ async def login(request: Request) -> JSONResponse:
         "message": "Signed in to the server.",
         "data": {"role": identity.role, "expiresAt": identity.expires_at},
     })
+    cross_site = bool(ALLOWED_ORIGINS)
     response.set_cookie(
         COOKIE_NAME,
         token,
         max_age=signer.lifetime_seconds,
         httponly=True,
-        secure=request.url.scheme == "https",
-        samesite="strict",
+        secure=True if cross_site else request.url.scheme == "https",
+        samesite="none" if cross_site else "strict",
         path="/",
     )
     return response
@@ -296,8 +313,14 @@ async def login(request: Request) -> JSONResponse:
 
 @app.post("/api/auth/logout")
 async def logout(_: Request) -> JSONResponse:
+    cross_site = bool(ALLOWED_ORIGINS)
     response = JSONResponse({"success": True, "message": "Signed out."})
-    response.delete_cookie(COOKIE_NAME, path="/", samesite="strict")
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        samesite="none" if cross_site else "strict",
+        secure=cross_site,
+    )
     return response
 
 

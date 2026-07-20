@@ -1,7 +1,23 @@
 (function () {
   "use strict";
 
-  const API_ROOT = "/api/v1";
+  // Backend origin used when this page is served from a different origin than
+  // the API (e.g. a separate static-site frontend). Override by setting
+  // window.ICON_API_BASE before this script loads. Left empty ("") means
+  // "same origin as this page" — the default when the FastAPI backend serves
+  // the frontend itself.
+  const BACKEND_ORIGIN = "https://icon-mobile-erp.onrender.com";
+  const API_BASE = (function () {
+    if (typeof window.ICON_API_BASE === "string") return window.ICON_API_BASE.replace(/\/$/, "");
+    if (typeof window !== "undefined" && window.location) {
+      const host = window.location.hostname.toLowerCase();
+      if (host === "localhost" || host === "127.0.0.1" || window.location.origin.replace(/\/$/, "") === BACKEND_ORIGIN) {
+        return "";
+      }
+    }
+    return BACKEND_ORIGIN;
+  })();
+  const API_ROOT = `${API_BASE}/api/v1`;
   const DEVICE_KEY = "ICON_MOBILE_DEVICE_ID_V1";
   const SNAPSHOT_KEY = "ICON_MOBILE_LOCAL_SNAPSHOT_V1";
   const SHARE_BASE_KEY = "ICON_MOBILE_LAN_SHARE_BASE_V1";
@@ -81,6 +97,7 @@
 
   async function request(path, options) {
     const opts = options || {};
+    const url = String(path || "").startsWith("/api") ? `${API_BASE}${path}` : path;
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeout = setTimeout(function () {
       if (controller) controller.abort();
@@ -95,13 +112,13 @@
     }
 
     try {
-      const response = await fetch(path, {
+      const response = await fetch(url, {
         method: opts.method || "GET",
         headers: headers,
         body: opts.body === undefined
           ? undefined
           : (opts.body instanceof FormData ? opts.body : JSON.stringify(opts.body)),
-        credentials: "same-origin",
+        credentials: API_BASE ? "include" : "same-origin",
         cache: "no-store",
         signal: controller ? controller.signal : undefined
       });
@@ -209,7 +226,7 @@
   }
 
   async function login(role, password) {
-    const result = await request("/api/auth/login", {
+    const result = await request(`${API_BASE}/api/auth/login`, {
       method: "POST",
       body: { role: role, password: password }
     });
@@ -219,7 +236,7 @@
 
   async function logout() {
     try {
-      return await request("/api/auth/logout", { method: "POST", body: {} });
+      return await request(`${API_BASE}/api/auth/logout`, { method: "POST", body: {} });
     } finally {
       stopSync();
     }
@@ -296,9 +313,14 @@
     return result;
   }
 
-  function socketUrl() {
+  function wsOrigin() {
+    if (API_BASE) return API_BASE.replace(/^http/i, "ws");
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${scheme}//${window.location.host}${API_ROOT}/events?device=${encodeURIComponent(getDeviceId())}`;
+    return `${scheme}//${window.location.host}`;
+  }
+
+  function socketUrl() {
+    return `${wsOrigin()}/api/v1/events?device=${encodeURIComponent(getDeviceId())}`;
   }
 
   function scheduleReconnect() {
@@ -398,9 +420,8 @@
 
   function createScannerHost(onScan, onConnected) {
     const channelId = randomId("scan").replace(/[^a-zA-Z0-9_-]/g, "");
-    const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(
-      `${scheme}//${window.location.host}${API_ROOT}/scanner/${encodeURIComponent(channelId)}?role=host`
+      `${wsOrigin()}/api/v1/scanner/${encodeURIComponent(channelId)}?role=host`
     );
     socket.onmessage = function (message) {
       try {
@@ -477,8 +498,15 @@
     }
   });
 
+  function apiUrl(path) {
+    const suffix = String(path || "");
+    return `${API_BASE}${suffix.startsWith("/") ? suffix : `/${suffix}`}`;
+  }
+
   window.IconAPI = Object.freeze({
     action: action,
+    apiBase: API_BASE,
+    apiUrl: apiUrl,
     cacheSnapshot: cacheSnapshot,
     createScannerHost: createScannerHost,
     getDeviceId: getDeviceId,

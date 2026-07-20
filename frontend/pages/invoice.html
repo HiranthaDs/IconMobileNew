@@ -430,7 +430,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                                             </div>
                                         </div>
                                         <div className="border border-gray-300 p-1.5 bg-white rounded shadow-sm shrink-0">
-                                            <img src={`/api/v1/qr?size=80&data=${encodeURIComponent(getInvoiceLink(invoiceId))}`} alt="QR" onLoad={() => setQrLoaded(true)} onError={() => setQrLoaded(true)} className="w-[55px] h-[55px] object-contain" />
+                                            <img src={window.IconAPI.apiUrl(`/api/v1/qr?size=80&data=${encodeURIComponent(getInvoiceLink(invoiceId))}`)} alt="QR" onLoad={() => setQrLoaded(true)} onError={() => setQrLoaded(true)} className="w-[55px] h-[55px] object-contain" />
                                         </div>
                                     </div>
                                 </div>

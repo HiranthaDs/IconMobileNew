@@ -1856,8 +1856,8 @@ function PrintableInvoice({ data, onDone }) {
     const balance = total - n(client.paymentAmount);
     
     const statementLink = getPartnerStatementLink(client.name);
-    const qrUrl = `/api/v1/qr?size=150&data=${encodeURIComponent(statementLink)}`;
-    const barcodeUrl = `/api/v1/barcode?text=${encodeURIComponent(invoiceId)}`;
+    const qrUrl = window.IconAPI.apiUrl(`/api/v1/qr?size=150&data=${encodeURIComponent(statementLink)}`);
+    const barcodeUrl = window.IconAPI.apiUrl(`/api/v1/barcode?text=${encodeURIComponent(invoiceId)}`);
 
     return (
         <div className="fixed inset-0 bg-slate-100 z-[999999] flex flex-col items-center overflow-auto pb-20">

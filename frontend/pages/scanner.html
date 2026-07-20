@@ -27,8 +27,13 @@
       const send=code=>{code=String(code||"").trim();if(!code)return;if(!connection||connection.readyState!==WebSocket.OPEN)return setStatus("Host is not connected. Keep the QR screen open and retry.");connection.send(JSON.stringify({value:code}));last.textContent=`Sent: ${code}`;navigator.vibrate?.(80);};
       if(!target)setStatus("This scanner link is missing its connection ID.");
       else{
-        const scheme=location.protocol==="https:"?"wss:":"ws:";
-        connection=new WebSocket(`${scheme}//${location.host}/api/v1/scanner/${encodeURIComponent(target)}?role=scanner`);
+        // Kept in sync with BACKEND_ORIGIN in assets/js/local-api.js. This page
+        // has no dependency on that script, so the origin is resolved here too.
+        const BACKEND_ORIGIN="https://icon-mobile-erp.onrender.com";
+        const host=location.hostname.toLowerCase();
+        const sameOrigin=host==="localhost"||host==="127.0.0.1"||location.origin.replace(/\/$/,"")===BACKEND_ORIGIN;
+        const wsOrigin=sameOrigin?`${location.protocol==="https:"?"wss:":"ws:"}//${location.host}`:BACKEND_ORIGIN.replace(/^http/i,"ws");
+        connection=new WebSocket(`${wsOrigin}/api/v1/scanner/${encodeURIComponent(target)}?role=scanner`);
         connection.onopen=()=>setStatus("Connected. Scan or enter a code.",true);
         connection.onclose=()=>setStatus("Host screen disconnected.");
         connection.onerror=()=>setStatus("Scanner connection failed. Check Wi-Fi and keep the host QR open.");
