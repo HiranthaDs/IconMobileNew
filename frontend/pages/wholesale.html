@@ -1865,6 +1865,13 @@ function PrintableInvoice({ data, onDone }) {
     const qrUrl = window.IconAPI.apiUrl(`/api/v1/qr?size=150&data=${encodeURIComponent(invoiceLink)}`);
     const barcodeUrl = window.IconAPI.apiUrl(`/api/v1/barcode?text=${encodeURIComponent(invoiceId)}`);
 
+    // Print/PDF opens the standalone B2B document, which auto-paginates long bills across
+    // multiple A4 pages (repeating the shop header + footer) and opens the print dialog itself.
+    const openPrint = () => {
+        const url = invoiceLink + (invoiceLink.indexOf('?') === -1 ? '?' : '&') + 'print=1';
+        window.open(url, '_blank', 'noopener,noreferrer');
+    };
+
     return (
         <div className="fixed inset-0 bg-slate-100 z-[999999] flex flex-col items-center overflow-auto pb-20 invoice-wrapper">
             <div className="fixed inset-x-0 top-4 z-50 no-print flex justify-center px-4 pointer-events-none">
@@ -1878,7 +1885,7 @@ function PrintableInvoice({ data, onDone }) {
                             </div>
                         </div>
                         <div className="flex flex-wrap gap-2 justify-end">
-                            <button type="button" onClick={() => window.print()} className="btn px-4 py-3 bg-white border border-slate-200 text-slate-700 shadow-sm font-black uppercase tracking-widest text-[9px] hover:bg-slate-50">Reprint</button>
+                            <button type="button" onClick={openPrint} className="btn px-4 py-3 bg-white border border-slate-200 text-slate-700 shadow-sm font-black uppercase tracking-widest text-[9px] hover:bg-slate-50">Print / Save PDF</button>
                             <button type="button" onClick={() => openWhatsApp(client.phone || client.whatsapp, message)} className="btn px-5 py-3 bg-[#25D366] hover:bg-[#128C7E] text-white border-none shadow-md font-black uppercase tracking-widest text-[9px]"><Icons.WhatsApp /> WhatsApp</button>
                             <button type="button" onClick={onDone} className="btn px-8 py-3 bg-slate-900 hover:bg-black text-white font-black shadow-md uppercase tracking-widest text-[10px]">Done</button>
                         </div>
@@ -1887,7 +1894,7 @@ function PrintableInvoice({ data, onDone }) {
             </div>
 
             <div className="fixed bottom-6 right-6 z-[9999999] no-print fade-in">
-                <button type="button" onClick={() => window.print()} className="bg-slate-900 hover:bg-black text-white px-6 py-3.5 rounded-full shadow-[0_10px_30px_rgba(15,23,42,0.4)] flex items-center gap-2.5 font-black text-xs uppercase tracking-widest transition-transform hover:-translate-y-1">
+                <button type="button" onClick={openPrint} className="bg-slate-900 hover:bg-black text-white px-6 py-3.5 rounded-full shadow-[0_10px_30px_rgba(15,23,42,0.4)] flex items-center gap-2.5 font-black text-xs uppercase tracking-widest transition-transform hover:-translate-y-1">
                     <Icons.Print /> Save PDF / Print
                 </button>
             </div>

@@ -173,6 +173,17 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
 
             useEffect(() => { fetchInvoice(false); }, [fetchInvoice]);
 
+            // When opened with ?print=1 (from the in-app wholesale "Print" button), auto-open the
+            // browser print dialog once the paginated document has rendered.
+            useEffect(() => {
+                if (loading || error || !data) return;
+                const params = new URLSearchParams(window.location.search);
+                if (params.get('print') === '1' || params.get('autoprint') === '1') {
+                    const t = setTimeout(() => { try { window.print(); } catch (e) {} }, 900);
+                    return () => clearTimeout(t);
+                }
+            }, [loading, error, data]);
+
             if (loading) {
                 return (
                     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6">

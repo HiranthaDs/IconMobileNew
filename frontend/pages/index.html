@@ -3211,22 +3211,14 @@ const PrintableInvoice = ({ data }) => {
                 scannerRef.current = scanner;
             };
 
+            // Print/PDF goes through the standalone invoice.html document, which auto-paginates
+            // long bills across multiple A4 pages (repeating the shop header + footer). Opening it
+            // with ?print=1 makes that page auto-open the print dialog once rendered.
             const executePrint = () => {
-                if (!printData) return;
-                const originalTitle = document.title;
-                const safeClientName = (printData.client.name || 'Customer').replace(/[^a-zA-Z0-9]/g, '_');
-                const now = new Date();
-                const dateStr = now.toISOString().split('T')[0];
-                const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
-                document.title = `Invoice_${safeClientName}_${dateStr}_${timeStr}`;
-
-                document.body.classList.add('printing');
-                
-                setTimeout(() => {
-                    window.print();
-                    document.title = originalTitle;
-                    document.body.classList.remove('printing');
-                }, 500);
+                if (!printData || !printData.invoiceId) return;
+                const base = getInvoiceLink(printData.invoiceId);
+                const url = base + (base.indexOf('?') === -1 ? '?' : '&') + 'print=1';
+                window.open(url, '_blank', 'noopener,noreferrer');
             };
 
             const scheduleSilentRefresh = () => {
@@ -3292,11 +3284,11 @@ const PrintableInvoice = ({ data }) => {
                 };
             }, [isLoggedIn]);
 
+            // The printable document opens in a new tab (a browser cannot reliably open a popup
+            // from a timer without a user gesture), so we surface the confirmation modal and let
+            // the owner click "Print / Save PDF" to open the auto-paginated invoice.
             useEffect(() => {
-                if (printData) {
-                    const autoPrintTimer = setTimeout(() => { executePrint(); }, 1500);
-                    return () => { clearTimeout(autoPrintTimer); document.body.classList.remove('printing'); };
-                }
+                if (printData) document.body.classList.remove('printing');
             }, [printData]);
 
             useEffect(() => {
@@ -3608,9 +3600,12 @@ const PrintableInvoice = ({ data }) => {
                                 <div className="absolute inset-0 glass-overlay z-50 flex items-center justify-center">
                                     <div className="bg-white p-10 rounded-3xl shadow-2xl max-w-sm w-full text-center border border-gray-200">
                                         <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4"><Icons.Check /></div>
-                                        <h2 className="text-2xl font-bold text-gray-900 mb-2">Invoice Formatted</h2>
-                                        <p className="text-gray-500 mb-6 text-sm leading-relaxed">The PDF print dialog should have opened. You can reprint or share the invoice digitally below.</p>
+                                        <h2 className="text-2xl font-bold text-gray-900 mb-2">Invoice Saved</h2>
+                                        <p className="text-gray-500 mb-6 text-sm leading-relaxed">Open the printable document to print or save it as a PDF. Long bills are automatically split across multiple pages.</p>
                                         <div className="flex flex-col gap-3">
+                                            <button type="button" onClick={executePrint} className="pro-button primary bg-[#007aff] hover:bg-[#005bb5] text-white w-full py-3">
+                                                <Icons.Print /> Print / Save PDF
+                                            </button>
                                             <button type="button" onClick={() => {
                                                 let phone = printData.client.phone.replace(/[^0-9+]/g, '');
                                                 if (phone.startsWith('0') && phone.length === 10) phone = '94' + phone.substring(1);
@@ -3621,8 +3616,7 @@ const PrintableInvoice = ({ data }) => {
                                             }} className="pro-button w-full py-3 bg-[#25D366] hover:bg-[#128C7E] text-white shadow-[0_4px_14px_rgba(37,211,102,0.3)] border-transparent">
                                                 <Icons.WhatsApp /> Share via WhatsApp
                                             </button>
-                                            <button type="button" onClick={executePrint} className="pro-button secondary w-full py-3">Reprint Document</button>
-                                            <button type="button" onClick={() => setPrintData(null)} className="pro-button primary bg-[#007aff] hover:bg-[#005bb5] text-white w-full py-3">Start New Action</button>
+                                            <button type="button" onClick={() => setPrintData(null)} className="pro-button secondary w-full py-3">Start New Action</button>
                                         </div>
                                     </div>
                                 </div>

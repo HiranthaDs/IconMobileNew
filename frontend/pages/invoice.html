@@ -270,6 +270,17 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                 return () => { if (typeof unsub === 'function') unsub(); window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); };
             }, [fetchInvoice]);
 
+            // When opened with ?print=1 (e.g. from the in-app POS "Print" button), auto-open the
+            // browser print dialog once the paginated document has rendered.
+            useEffect(() => {
+                if (loading || error || !invoiceData) return;
+                const params = new URLSearchParams(window.location.search);
+                if (params.get('print') === '1' || params.get('autoprint') === '1') {
+                    const t = setTimeout(() => { try { window.print(); } catch (e) {} }, 900);
+                    return () => clearTimeout(t);
+                }
+            }, [loading, error, invoiceData]);
+
             const handleDownloadPdf = () => { window.print(); };
 
             if (loading) {
