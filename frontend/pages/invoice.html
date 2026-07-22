@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ICON MOBILE - Digital Invoice View</title>
-    
+
     <link rel="stylesheet" href="/assets/css/app.css">
     <script src="/assets/js/vendor/react.production.min.js"></script>
     <script src="/assets/js/vendor/react-dom.production.min.js"></script>
@@ -12,19 +12,8 @@
     <script src="/assets/js/local-api.js"></script>
 
     <style>
-        :root {
-            --win-bg: #E5E5E5;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: var(--win-bg); 
-            color: #1d1d1f;
-            margin: 0;
-            padding: 0;
-            -webkit-font-smoothing: antialiased;
-        }
-
+        :root { --win-bg: #E5E5E5; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: var(--win-bg); color: #1d1d1f; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -32,25 +21,19 @@
             @page { size: A4 portrait; margin: 0; }
             html, body {
                 width: 210mm !important;
-                height: 297mm !important;
-                max-height: 297mm !important;
                 background-color: #ffffff !important;
                 margin: 0 !important;
                 padding: 0 !important;
-                overflow: hidden !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
             .no-print { display: none !important; }
-            .invoice-wrapper {
-                display: block !important;
-                overflow: visible !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                background: none !important;
-            }
-            .invoice-page { 
-                width: 210mm !important; 
+            .invoice-wrapper { display: block !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; min-height: 0 !important; background: none !important; }
+            /* On-screen scaling shell becomes a transparent pass-through when printing,
+               so the real A4 pages flow one after another instead of stacking/clipping. */
+            .page-shell { display: block !important; height: auto !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; }
+            .invoice-page {
+                width: 210mm !important;
                 height: 297mm !important;
                 max-height: 297mm !important;
                 background-color: #ffffff !important;
@@ -58,29 +41,27 @@
                 margin: 0 !important;
                 padding: 12mm 15mm !important;
                 border-radius: 0 !important;
-                position: absolute !important;
-                top: 0 !important; 
-                left: 0 !important;
+                position: relative !important;
                 display: flex !important;
                 flex-direction: column !important;
-                page-break-after: avoid !important;
+                overflow: hidden !important;
                 page-break-inside: avoid !important;
-                transform: none !important; /* Force reset scaling on print */
+                break-inside: avoid !important;
+                transform: none !important;
             }
+            .force-page-break { page-break-after: always !important; break-after: page !important; }
             .print-row { flex-direction: row !important; }
             .print-w-45 { width: 45% !important; }
             .print-w-55 { width: 55% !important; }
             .print-overflow-visible { overflow: visible !important; }
             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
-    
 
     /* Safe startup screen: prevents invisible blank pages when CDN/Babel/backend fails */
     .boot-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at top left,#e0f2fe 0,transparent 36%),radial-gradient(circle at bottom right,#dbeafe 0,transparent 34%),#f8fafc; padding:24px; font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,sans-serif; }
     .boot-card { width:min(430px,100%); background:rgba(255,255,255,.86); border:1px solid rgba(255,255,255,.74); border-radius:32px; padding:32px; text-align:center; box-shadow:0 30px 90px rgba(15,23,42,.16); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%); }
     .boot-spinner { width:48px; height:48px; border-radius:999px; border:4px solid rgba(37,99,235,.14); border-top-color:#2563eb; animation:bootSpin .9s linear infinite; margin:0 auto 18px; }
     @keyframes bootSpin { to { transform:rotate(360deg); } }
-
   </style>
 </head>
 <body>
@@ -94,7 +75,6 @@
     </div>
   </div>
 
-    
   <script>
     (function(){
       window.__ICON_BOOT_ERROR__ = function(message){
@@ -129,8 +109,6 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
         const Icons = {
             Download: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
             Alert: () => <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-500"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
-            Star: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-500"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
-            Check: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>,
             Shield: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         };
 
@@ -144,7 +122,6 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                             <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-lg border border-red-200 text-center">
                                 <div className="flex justify-center mb-4"><Icons.Alert /></div>
                                 <h2 className="text-xl font-black text-gray-900 mb-2">Rendering Error</h2>
-                                <p className="text-sm text-gray-600 mb-4">We encountered a problem displaying this invoice data.</p>
                                 <div className="bg-gray-50 p-4 rounded-lg overflow-x-auto text-xs font-mono text-red-600 text-left mb-6">{this.state.error?.toString()}</div>
                                 <button onClick={() => window.location.reload()} className="w-full py-3 bg-[#007aff] hover:bg-[#005bb5] text-white font-bold rounded-xl shadow-md">Reload Page</button>
                             </div>
@@ -156,7 +133,6 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
         }
 
         const formatMoney = (val) => { const num = parseFloat(val); if (isNaN(num)) return "0"; return num.toLocaleString('en-US'); };
-        const formatMoneyDec = (val) => { const num = parseFloat(val); if (isNaN(num)) return "0.00"; return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
 
         const formatSpecsForPdf = (specsStr) => {
             if (!specsStr) return "";
@@ -179,24 +155,29 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
         };
 
         const safePrice = (priceVal) => {
-            const num = parseFloat(String(priceVal || '0').replace(/[^0-9.-]+/g,""));
+            const num = parseFloat(String(priceVal || '0').replace(/[^0-9.-]+/g, ""));
             return isNaN(num) ? 0 : num;
         };
 
-        const getInvoiceLink = (id) => {
-            return window.IconAPI.getShareUrl(`/invoice.html?id=${encodeURIComponent(id || '')}`);
+        const warrantyLineCount = (item) => {
+            if (item?.isExchange) return 1;
+            const fields = ['software', 'global', 'extended', 'appleCare'];
+            const c = fields.filter(f => { const v = item?.warranty?.[f]; return v && v !== 'None' && v !== ''; }).length;
+            return c === 0 ? 1 : c;
         };
+
+        const getInvoiceLink = (id) => window.IconAPI.getShareUrl(`/invoice.html?id=${encodeURIComponent(id || '')}`);
 
         const INVOICE_CACHE_PREFIX = "ICON_MOBILE_INVOICE_LOCAL_SQLITE_V1:";
         const invoiceSafeStorage = {
-            get(key, fallback = null) { try { return localStorage.getItem(key) ?? fallback; } catch(e) { return fallback; } },
-            set(key, value) { try { localStorage.setItem(key, value); } catch(e) {} },
-            remove(key) { try { localStorage.removeItem(key); } catch(e) {} }
+            get(key, fallback = null) { try { return localStorage.getItem(key) ?? fallback; } catch (e) { return fallback; } },
+            set(key, value) { try { localStorage.setItem(key, value); } catch (e) {} },
+            remove(key) { try { localStorage.removeItem(key); } catch (e) {} }
         };
         const safeParseJSON = (value, fallback = null) => {
             if (value === null || value === undefined || value === '') return fallback;
             if (typeof value === 'object') return value;
-            try { return JSON.parse(String(value)); } catch(e) { return fallback; }
+            try { return JSON.parse(String(value)); } catch (e) { return fallback; }
         };
         const normalizeInvoiceRecord = (record) => {
             if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
@@ -208,46 +189,31 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
             if (!invoiceId) return null;
             return { ...record, invoiceId, client: { ...nested, invoiceId, name: nested.name || record.name || record.customerName || 'Customer', phone: nested.phone || record.phone || '', email: nested.email || record.email || '' }, purchasedItems: items, items };
         };
+
+        // A4 content area in CSS px (297mm page - 2x15mm padding = 267mm; 96dpi). Kept a
+        // little conservative so the on-screen (overflow:hidden) page never clips.
+        const PAGE_PX = 1000;
+
         const App = () => {
             const [invoiceData, setInvoiceData] = useState(null);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState("");
-            const [qrLoaded, setQrLoaded] = useState(false);
             const [scale, setScale] = useState(1);
 
             useEffect(() => {
                 const updateScale = () => {
-                    if (window.matchMedia('print').matches) {
-                        setScale(1); 
-                        return;
-                    }
-                    const screenWidth = window.innerWidth;
-                    const invoiceWidthPx = 794; 
-                    
-                    if (screenWidth < invoiceWidthPx + 32) {
-                        setScale((screenWidth - 24) / invoiceWidthPx);
-                    } else {
-                        setScale(1);
-                    }
+                    if (window.matchMedia('print').matches) { setScale(1); return; }
+                    const w = window.innerWidth;
+                    const pageW = 794;
+                    setScale(w < pageW + 32 ? (w - 24) / pageW : 1);
                 };
-
                 updateScale();
                 window.addEventListener('resize', updateScale);
-                
-                const printQuery = window.matchMedia('print');
-                if (printQuery.addEventListener) {
-                    printQuery.addEventListener('change', updateScale);
-                } else {
-                    printQuery.addListener(updateScale); 
-                }
-
+                const pq = window.matchMedia('print');
+                if (pq.addEventListener) pq.addEventListener('change', updateScale); else pq.addListener(updateScale);
                 return () => {
                     window.removeEventListener('resize', updateScale);
-                    if (printQuery.removeEventListener) {
-                        printQuery.removeEventListener('change', updateScale);
-                    } else {
-                        printQuery.removeListener(updateScale);
-                    }
+                    if (pq.removeEventListener) pq.removeEventListener('change', updateScale); else pq.removeListener(updateScale);
                 };
             }, []);
 
@@ -255,13 +221,8 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                 if (!silent) { setLoading(true); setError(""); }
                 const urlParams = new URLSearchParams(window.location.search);
                 const hashId = window.location.hash.startsWith('#invoice=') ? window.location.hash.slice(9) : '';
-                const targetId = String(
-                    urlParams.get('id') || urlParams.get('invoice') || urlParams.get('invoiceId') || hashId || ''
-                ).trim();
-                if (!targetId) {
-                    if (!silent) { setError("No Invoice ID provided in the link."); setLoading(false); }
-                    return;
-                }
+                const targetId = String(urlParams.get('id') || urlParams.get('invoice') || urlParams.get('invoiceId') || hashId || '').trim();
+                if (!targetId) { if (!silent) { setError("No Invoice ID provided in the link."); setLoading(false); } return; }
                 const cacheKey = INVOICE_CACHE_PREFIX + targetId;
                 const applyInvoice = (record) => {
                     const normalized = normalizeInvoiceRecord(record);
@@ -282,10 +243,8 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                 } catch (e) {
                     console.error('Invoice load failed:', e);
                     if (e?.code === 'invoice_not_found') {
-                        invoiceSafeStorage.remove(cacheKey);
-                        setInvoiceData(null);
-                        if (!silent) setError(`Invoice ${targetId} was not found. It may have been deleted by an administrator.`);
-                        if (!silent) setLoading(false);
+                        invoiceSafeStorage.remove(cacheKey); setInvoiceData(null);
+                        if (!silent) { setError(`Invoice ${targetId} was not found. It may have been deleted by an administrator.`); setLoading(false); }
                         return;
                     }
                     const cachedEnvelope = safeParseJSON(invoiceSafeStorage.get(cacheKey, ''), null);
@@ -304,15 +263,11 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
 
             useEffect(() => { fetchInvoice(false); }, [fetchInvoice]);
             useEffect(() => {
-                const refreshSilently = () => fetchInvoice(true);
-                const unsubscribe = window.IconAPI.subscribe(refreshSilently);
-                window.addEventListener('online', refreshSilently);
-                window.addEventListener('focus', refreshSilently);
-                return () => {
-                    if (typeof unsubscribe === 'function') unsubscribe();
-                    window.removeEventListener('online', refreshSilently);
-                    window.removeEventListener('focus', refreshSilently);
-                };
+                const refresh = () => fetchInvoice(true);
+                const unsub = window.IconAPI.subscribe(refresh);
+                window.addEventListener('online', refresh);
+                window.addEventListener('focus', refresh);
+                return () => { if (typeof unsub === 'function') unsub(); window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); };
             }, [fetchInvoice]);
 
             const handleDownloadPdf = () => { window.print(); };
@@ -325,7 +280,6 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                     </div>
                 );
             }
-
             if (error || !invoiceData) {
                 return (
                     <div className="min-h-screen flex items-center justify-center p-6 bg-[#f5f5f7]">
@@ -340,43 +294,256 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
             }
 
             const client = invoiceData.client || invoiceData || {};
-            
             let purchasedItems = [];
             if (Array.isArray(invoiceData.purchasedItems)) purchasedItems = invoiceData.purchasedItems;
             else if (Array.isArray(invoiceData.items)) purchasedItems = invoiceData.items;
             else if (client && Array.isArray(client.purchasedItems)) purchasedItems = client.purchasedItems;
-            else if (typeof invoiceData.purchasedItems === 'string') { try { purchasedItems = JSON.parse(invoiceData.purchasedItems); } catch(e){} }
-            else if (typeof invoiceData.items === 'string') { try { purchasedItems = JSON.parse(invoiceData.items); } catch(e){} }
 
             const displayDiscount = safePrice(invoiceData.discount || invoiceData.globalDiscount || client.discount);
             const totalQuantity = invoiceData.totalQuantity || invoiceData.totalQty || client.totalQuantity || purchasedItems.length || 0;
-            let date = invoiceData.date || client.date || invoiceData.invoiceDate || invoiceData.timestamp || "";
-
+            const date = invoiceData.date || client.date || invoiceData.invoiceDate || invoiceData.timestamp || "";
             const invoiceId = invoiceData.invoiceId || client.invoiceId || "";
             const clientName = client.name || invoiceData.name || '-';
             const clientPhone = client.phone || invoiceData.phone || '-';
             const clientEmail = client.email || invoiceData.email || '';
             const paymentMethod = client.paymentMethod || invoiceData.paymentMethod || 'CASH';
 
-            const baseSubTotal = purchasedItems.reduce((sum, item) => sum + (item.isExchange ? 0 : (parseFloat(item.Price) || parseFloat(item.sellPrice) || 0) * (item.cartQty || item.Quantity || 1)), 0);
-            const totalWarrantyCost = purchasedItems.reduce((sum, item) => sum + (item.isExchange ? 0 : (parseFloat(item.warranty?.extendedPrice) || 0) * (item.cartQty || item.Quantity || 1)), 0);
-            const totalExchangeValue = purchasedItems.reduce((sum, item) => sum + (item.isExchange ? (parseFloat(item.buyPrice || item.Price) || 0) * (item.cartQty || item.Quantity || 1) : 0), 0);
-
+            const baseSubTotal = purchasedItems.reduce((s, item) => s + (item.isExchange ? 0 : (parseFloat(item.Price) || parseFloat(item.sellPrice) || 0) * (item.cartQty || item.Quantity || 1)), 0);
+            const totalWarrantyCost = purchasedItems.reduce((s, item) => s + (item.isExchange ? 0 : (parseFloat(item.warranty?.extendedPrice) || 0) * (item.cartQty || item.Quantity || 1)), 0);
+            const totalExchangeValue = purchasedItems.reduce((s, item) => s + (item.isExchange ? (parseFloat(item.buyPrice || item.Price) || 0) * (item.cartQty || item.Quantity || 1) : 0), 0);
             const computedGrandTotal = baseSubTotal + totalWarrantyCost - totalExchangeValue - displayDiscount;
 
             const itemsWithWarranty = purchasedItems.filter(item => !item.isExchange && (
-                (item.warranty?.p2p && item.warranty.p2p !== 'None' && item.warranty.p2p !== '') ||
-                (item.warranty?.hardware && item.warranty.hardware !== 'None' && item.warranty.hardware !== '') ||
                 (item.warranty?.software && item.warranty.software !== 'None' && item.warranty.software !== '') ||
                 (item.warranty?.global && item.warranty.global !== 'None' && item.warranty.global !== '') ||
                 (item.warranty?.extended && item.warranty.extended !== 'None' && item.warranty.extended !== '') ||
                 (item.warranty?.appleCare && item.warranty.appleCare !== 'None' && item.warranty.appleCare !== '')
             ));
 
+            // ---- Deterministic pagination (no DOM measurement) ----
+            // Estimated printed height of one item row, in px.
+            const rowPx = (item) => 26 + Math.max(30, warrantyLineCount(item) * 14);
+            const rows = purchasedItems.map(rowPx);
+            const nRows = rows.length;
+
+            const HEADER = 104, BILLTO = 68, THEAD = 30, SLIM_FOOTER = 78;
+            const contOverhead = HEADER + BILLTO + THEAD + SLIM_FOOTER;
+            const contBudget = PAGE_PX - contOverhead;           // room for items on a continuation page
+
+            const SUMMARY = 150, REVIEWS = 120, TERMS = 140;
+            const expiryPx = itemsWithWarranty.length > 0 ? (Math.ceil(itemsWithWarranty.length / 2) * 54 + 24) : 0;
+            const fullFooter = Math.max(REVIEWS + 70 /*signatures under reviews col*/, expiryPx + TERMS);
+            const lastOverhead = HEADER + BILLTO + THEAD + SUMMARY + fullFooter;
+            const lastBudget = Math.max(PAGE_PX - lastOverhead, 120);   // room for items on the final page
+
+            // Fill pages: earlier pages use the continuation budget; the final page must also
+            // hold the totals + warranty/terms footer, so it uses the smaller last-page budget.
+            const pages = [];
+            {
+                let i = 0;
+                while (i < nRows) {
+                    let remaining = 0; for (let k = i; k < nRows; k++) remaining += rows[k];
+                    if (remaining <= lastBudget) { const c = []; for (let k = i; k < nRows; k++) c.push(k); pages.push(c); i = nRows; break; }
+                    let h = 0; const chunk = [];
+                    while (i < nRows && (chunk.length === 0 || h + rows[i] <= contBudget)) { h += rows[i]; chunk.push(i); i++; }
+                    if (i >= nRows && chunk.length > 1) { const moved = chunk.pop(); i = moved; } // leave >=1 item for a proper final page
+                    pages.push(chunk);
+                }
+                if (pages.length === 0) pages.push([]);
+            }
+            const totalPages = pages.length;
+
+            const renderHeader = (pageNum) => (
+                <div className="shrink-0 flex flex-row print-row justify-between items-start border-b-2 border-[#1d1d1f] pb-4 mb-5 gap-4">
+                    <div className="flex items-center gap-4">
+                        <img src="/assets/images/logo.png" alt="Logo" className="h-[60px] w-[60px] object-contain rounded-xl" onError={(e) => e.target.style.display = 'none'} />
+                        <div className="leading-tight">
+                            <h1 className="text-[28px] font-black text-gray-900 tracking-tighter uppercase mb-0.5">ICON MOBILE</h1>
+                            <p className="text-[10px] font-semibold text-gray-600">No:59, First Floor, Liberty Plaza, colombo 03</p>
+                            <p className="text-[10px] font-semibold text-gray-600">+94 77 27 29 226</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-6">
+                        <div className="text-right">
+                            <h2 className="text-[24px] font-black text-[#007aff] tracking-widest uppercase leading-none mb-1.5">INVOICE</h2>
+                            <div className="flex flex-col gap-[2px] text-[10px] text-gray-800 font-medium">
+                                <div className="flex justify-end gap-2"><span className="text-gray-500 uppercase tracking-widest text-[8px] font-bold">Invoice No:</span><span className="font-bold">{invoiceId}</span></div>
+                                <div className="flex justify-end gap-2"><span className="text-gray-500 uppercase tracking-widest text-[8px] font-bold">Date:</span><span className="font-bold">{date}</span></div>
+                                {totalPages > 1 && <div className="flex justify-end gap-2"><span className="text-gray-500 uppercase tracking-widest text-[8px] font-bold">Page:</span><span className="font-bold">{pageNum} / {totalPages}</span></div>}
+                            </div>
+                        </div>
+                        <div className="border border-gray-300 p-1.5 bg-white rounded shadow-sm shrink-0">
+                            <img src={window.IconAPI.apiUrl(`/api/v1/qr?size=80&data=${encodeURIComponent(getInvoiceLink(invoiceId))}`)} alt="QR" className="w-[55px] h-[55px] object-contain" />
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderBillTo = () => (
+                <div className="shrink-0 flex justify-between items-start mb-6 gap-4">
+                    <div className="flex flex-col text-gray-900 leading-tight">
+                        <h3 className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">Bill To</h3>
+                        <span className="text-[19px] font-black mb-1 tracking-tight">{clientName}</span>
+                        <span className="text-[11px] font-semibold text-gray-600">{clientPhone}</span>
+                        {clientEmail && <span className="text-[11px] font-semibold text-gray-600">{clientEmail}</span>}
+                    </div>
+                    <div className="text-right">
+                        <h3 className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">Payment Method</h3>
+                        <span className="text-[19px] font-black text-[#007aff] uppercase mt-1 block tracking-tight">{paymentMethod}</span>
+                    </div>
+                </div>
+            );
+
+            const renderTableHead = () => (
+                <thead>
+                    <tr className="border-b-2 border-gray-200 text-gray-900">
+                        <th className="py-2 text-left font-black w-[35%] uppercase tracking-widest text-[8.5px] text-gray-500">Description</th>
+                        <th className="py-2 text-left font-black w-[25%] uppercase tracking-widest text-[8.5px] text-gray-500">Serial / ID</th>
+                        <th className="py-2 text-left font-black w-[20%] uppercase tracking-widest text-[8.5px] text-gray-500">Warranty</th>
+                        <th className="py-2 text-center font-black w-[5%] uppercase tracking-widest text-[8.5px] text-gray-500">Qty</th>
+                        <th className="py-2 text-right font-black w-[15%] uppercase tracking-widest text-[8.5px] text-gray-500">Price (LKR)</th>
+                    </tr>
+                </thead>
+            );
+
+            const renderRow = (item, idx) => {
+                const itemDiscount = safePrice(item?.itemDiscount);
+                const basePrice = safePrice(item?.Price || item?.sellPrice);
+                const extPrice = safePrice(item?.warranty?.extendedPrice);
+                const hasSoft = item?.warranty?.software && item.warranty.software !== 'None' && item.warranty.software !== '';
+                const hasGlob = item?.warranty?.global && item.warranty.global !== 'None' && item.warranty.global !== '';
+                const hasExt = item?.warranty?.extended && item.warranty.extended !== 'None' && item.warranty.extended !== '';
+                const hasAc = item?.warranty?.appleCare && item.warranty.appleCare !== 'None' && item.warranty.appleCare !== '';
+                const noWarranty = !hasSoft && !hasGlob && !hasExt && !hasAc;
+                const fw = (label, val, isExt = false) => {
+                    if (!val || val === "None" || val === "") return null;
+                    return (
+                        <div key={label} className="leading-tight mb-0.5 flex items-start gap-1">
+                            {isExt && <span className="text-gray-400 shrink-0 inline-flex mt-[1px]"><Icons.Shield className="w-2.5 h-2.5" /></span>}
+                            <div><span className="text-gray-500 font-semibold">{label}:</span> <strong className="font-bold">{val}</strong></div>
+                        </div>
+                    );
+                };
+                return (
+                    <tr key={idx} className="border-b border-gray-100 align-top text-gray-900">
+                        <td className="py-3 pr-2">
+                            <div className={`font-bold text-[12px] tracking-tight leading-tight mb-1 ${item?.isExchange ? 'text-green-600' : 'text-gray-900'}`}>
+                                {item?.isExchange && <span className="mr-1 text-[8.5px] font-black bg-green-100 text-green-700 px-1.5 py-0.5 rounded border border-green-200 uppercase tracking-widest">Exchange In</span>}
+                                {item?.Brand} {item?.Model}
+                            </div>
+                            <div className="text-[9.5px] text-gray-500 font-medium">{formatSpecsForPdf(item?.Specs)} {!item?.isExchange && item?.Color ? `| ${item.Color}` : ''}</div>
+                        </td>
+                        <td className="py-3 pr-2 font-mono text-[10.5px] break-all leading-tight font-semibold text-gray-700">{item?.displayImei || item?.["IMEI or Item Code"] || item?.originalCode}</td>
+                        <td className="py-3 pr-2">
+                            {!item?.isExchange ? (
+                                <div className="flex flex-col text-[8.5px] leading-snug">
+                                    {fw("Software", item?.warranty?.software)}
+                                    {fw("Warranty", item?.warranty?.global)}
+                                    {fw("Extended", item?.warranty?.extended, true)}
+                                    {fw("Apple Care", item?.warranty?.appleCare)}
+                                    {noWarranty && <span className="text-[8.5px] text-gray-400 font-semibold italic">No Warranty Issued</span>}
+                                </div>
+                            ) : (<span className="text-[8.5px] text-gray-400 italic">N/A</span>)}
+                        </td>
+                        <td className="py-3 text-center font-bold text-[12px]">{item?.cartQty || item?.Quantity || 1}</td>
+                        <td className="py-3 pl-2 text-right">
+                            {item?.isExchange ? (
+                                <span className="font-bold text-green-600 text-[12px]">- {formatMoney(basePrice)}</span>
+                            ) : itemDiscount > 0 ? (
+                                <div className="flex flex-col items-end leading-tight">
+                                    <span className="text-[8.5px] text-red-500 line-through font-bold">{formatMoney(basePrice + extPrice)}</span>
+                                    <span className="font-bold text-[12px]">{formatMoney(basePrice + extPrice - itemDiscount)}</span>
+                                </div>
+                            ) : (<span className="font-bold text-[12px]">{formatMoney(basePrice + extPrice)}</span>)}
+                        </td>
+                    </tr>
+                );
+            };
+
+            const renderSummary = () => (
+                <div className="shrink-0 flex justify-end mb-5 mt-4">
+                    <div className="w-64 border-t-2 border-gray-900 pt-2">
+                        <div className="flex justify-between text-[11.5px] font-medium text-gray-600 mb-1"><span className="uppercase tracking-widest text-[9px] font-bold text-gray-400">Total Quantity:</span><span className="font-bold text-gray-900">{totalQuantity}</span></div>
+                        <div className="flex justify-between text-[11.5px] font-medium text-gray-600 mb-1"><span className="uppercase tracking-widest text-[9px] font-bold text-gray-400">Base Subtotal:</span><span className="font-bold text-gray-900">LKR {formatMoney(baseSubTotal)}</span></div>
+                        {totalWarrantyCost > 0 && <div className="flex justify-between text-[11.5px] font-bold text-blue-600 mb-1"><span className="uppercase tracking-widest text-[9px]">Ext. Warranty:</span><span>+ LKR {formatMoney(totalWarrantyCost)}</span></div>}
+                        {totalExchangeValue > 0 && <div className="flex justify-between text-[11.5px] font-bold text-green-600 mb-1"><span className="uppercase tracking-widest text-[9px]">Exchange Value:</span><span>- LKR {formatMoney(totalExchangeValue)}</span></div>}
+                        {displayDiscount > 0 && <div className="flex justify-between text-[11.5px] font-bold text-red-500 mb-1"><span className="uppercase tracking-widest text-[9px]">Discount:</span><span>- LKR {formatMoney(displayDiscount)}</span></div>}
+                        <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-gray-200"><span className="text-[10.5px] font-black text-gray-900 uppercase tracking-widest">Grand Total:</span><span className={`text-[17px] font-black tracking-tighter ${computedGrandTotal < 0 ? 'text-green-600' : 'text-gray-900'}`}>{computedGrandTotal < 0 ? '+ LKR ' : 'LKR '} {formatMoney(Math.abs(computedGrandTotal))}</span></div>
+                    </div>
+                </div>
+            );
+
+            // Two signature lines — the consistent "bottom part" repeated on every page.
+            const renderSignatures = () => (
+                <div className="shrink-0">
+                    <div className="flex gap-8">
+                        <div className="flex-1 border-t border-gray-400 pt-1.5 text-center"><span className="font-black text-[8px] text-gray-400 uppercase tracking-widest">Client Signature</span></div>
+                        <div className="flex-1 border-t border-gray-400 pt-1.5 text-center"><span className="font-black text-[8px] text-gray-400 uppercase tracking-widest">Authorized Signature</span></div>
+                    </div>
+                    <div className="text-right mt-2 pt-2 border-t border-gray-200"><span className="text-[6.5px] font-black text-gray-400 tracking-widest uppercase">Invoice issued by Hich Web Solutions 0714112113</span></div>
+                </div>
+            );
+
+            // Rich block — reviews/map, warranty expiry dates and terms. Shown once, on the last page.
+            const renderTail = () => (
+                <div className="shrink-0 flex flex-row print-row gap-8 text-[9px] text-gray-800 items-stretch pt-2 mb-4">
+                    <div className="w-[45%] print-w-45 flex flex-col gap-3">
+                        <div className="flex items-center gap-3">
+                            <img src="/assets/images/Google reviews.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display = 'none'} />
+                            <div>
+                                <div className="flex items-center gap-1.5 mb-0.5"><img src="/assets/images/Google.png" alt="G" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display = 'none'} /><span className="font-black text-[8.5px] text-gray-900 uppercase tracking-widest">Review us on Google</span></div>
+                                <p className="text-[8px] font-medium text-gray-500 leading-tight">Scan the QR code to share your experience!</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <img src="/assets/images/Map Qr.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display = 'none'} />
+                            <div>
+                                <div className="flex items-center gap-1.5 mb-0.5"><img src="/assets/images/googlemap.png" alt="Map" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display = 'none'} /><span className="font-black text-[8.5px] text-gray-900 uppercase tracking-widest">Find Us on Map</span></div>
+                                <p className="text-[8px] font-medium text-gray-500 leading-tight">Scan the QR code to get directions to our store!</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="w-[55%] print-w-55 flex flex-col gap-3">
+                        {itemsWithWarranty.length > 0 && (
+                            <div>
+                                <h4 className="font-black text-[9px] uppercase tracking-widest text-gray-400 mb-1.5 block">Warranty Expiry Dates</h4>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                    {itemsWithWarranty.map((item, idx) => (
+                                        <div key={idx} className="text-[8px] leading-tight font-medium text-gray-700">
+                                            <span className="font-bold text-gray-900 block mb-0.5 text-[8.5px]">ID: {item.displayImei || item["IMEI or Item Code"] || item.originalCode}</span>
+                                            <div className="flex flex-col gap-[1px]">
+                                                {item.warranty?.software && item.warranty.software !== 'None' && <div><span className="text-gray-500">Software:</span> <span className="font-bold">{item.warranty.softwareEnd || item.warranty.software}</span></div>}
+                                                {item.warranty?.global && item.warranty.global !== 'None' && <div><span className="text-gray-500">General:</span> <span className="font-bold">{item.warranty.globalEnd || item.warranty.global}</span></div>}
+                                                {item.warranty?.extended && item.warranty.extended !== 'None' && <div><span className="text-gray-500">Ext. Warranty:</span> <span className="font-bold">{item.warranty.extendedEnd || item.warranty.extended}</span></div>}
+                                                {item.warranty?.appleCare && item.warranty.appleCare !== 'None' && <div><span className="text-gray-500">Apple Care:</span> <span className="font-bold">{item.warranty.appleCareEnd || item.warranty.appleCare}</span></div>}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        <div className="text-[7.5px] leading-[1.25] text-gray-600 text-justify font-medium">
+                            <h4 className="font-black text-[8px] uppercase tracking-widest text-gray-400 mb-1 block">Terms of Sale and Warranty</h4>
+                            <ol className="list-decimal pl-3 space-y-1 mb-1">
+                                <li>Warranty is valid only when the product is used under normal operating conditions.</li>
+                                <li>Display, Face ID, and Fingerprint ID issues are not covered under warranty.</li>
+                                <li>Physical damage such as cracks, dents, scratches, or signs of impact/dropping are not covered.</li>
+                                <li>Liquid or water damage, or any signs of moisture inside the device, are not covered.</li>
+                                <li>If the warranty sticker is missing, tampered with, or replaced, the warranty is void.</li>
+                                <li>Warranty claims require the device to be in a working (power-on) condition.</li>
+                                <li>Claims will not be accepted after the warranty period has expired.</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const watermark = (
+                <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none z-0"><img src="/assets/images/logo watermark.png" alt="" className="w-[80%] object-contain" onError={(e) => e.target.style.display = 'none'} /></div>
+            );
+
             return (
                 <div className="min-h-screen pt-4 pb-[100px] flex flex-col items-center invoice-wrapper">
-                    
-                    {/* Floating Action Buttons */}
                     <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:absolute sm:top-6 sm:right-6 sm:bottom-auto flex flex-row gap-3 no-print z-50">
                         <button onClick={() => fetchInvoice(false)} className="flex items-center justify-center w-12 h-12 bg-white border border-gray-200 text-gray-700 hover:text-blue-600 rounded-xl sm:rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:bg-gray-50 transition-all hover:-translate-y-0.5" title="Refresh Invoice Data">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
@@ -387,271 +554,33 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                     </div>
 
                     <p className="text-gray-500 text-[10px] sm:text-xs font-semibold uppercase tracking-widest mb-4 mt-2 no-print text-center w-full">
-                        Official Digital Document
+                        Official Digital Document{totalPages > 1 ? ` — ${totalPages} pages` : ''}
                     </p>
 
-                    <div 
-                        className="w-full flex justify-center print-overflow-visible overflow-hidden" 
-                        style={{ height: `calc(${297 * scale}mm + 40px)` }}
-                    >
-                        <div 
-                            className="invoice-page shrink-0 relative bg-white shadow-2xl print:shadow-none box-border flex flex-col overflow-hidden text-[#1d1d1f]"
-                            style={{
-                                width: '210mm',
-                                minWidth: '210mm',
-                                height: '297mm',
-                                minHeight: '297mm',
-                                maxHeight: '297mm',
-                                padding: '15mm',
-                                transform: `scale(${scale})`,
-                                transformOrigin: 'top center'
-                            }}
-                        >
-                            
-                            <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none z-0"><img src="/assets/images/logo watermark.png" alt="" className="w-[80%] object-contain" onError={(e) => e.target.style.display='none'} /></div>
-                            <div className="relative z-10 flex flex-col w-full h-full flex-1">
-                                
-                                {/* Header with updated address and phone number */}
-                                <div className="shrink-0 flex flex-row print-row justify-between items-start border-b-2 border-[#1d1d1f] pb-4 mb-5 gap-4">
-                                    <div className="flex items-center gap-4">
-                                        <img src="/assets/images/logo.png" alt="Logo" className="h-[60px] w-[60px] object-contain rounded-xl" onError={(e) => e.target.style.display='none'} />
-                                        <div className="leading-tight">
-                                            <h1 className="text-[28px] font-black text-gray-900 tracking-tighter uppercase mb-0.5">ICON MOBILE</h1>
-                                            <p className="text-[10px] font-semibold text-gray-600">No:59, First Floor, Liberty Plaza, colombo 03</p>
-                                            <p className="text-[10px] font-semibold text-gray-600">+94 77 27 29 226</p>
+                    {pages.map((rowIdxs, pageIdx) => {
+                        const isLast = pageIdx === totalPages - 1;
+                        return (
+                            <div key={pageIdx} className="page-shell w-full flex justify-center print-overflow-visible overflow-hidden" style={{ height: `calc(${297 * scale}mm + 40px)`, marginBottom: isLast ? 0 : '24px' }}>
+                                <div className={`invoice-page shrink-0 relative bg-white shadow-2xl print:shadow-none box-border flex flex-col overflow-hidden text-[#1d1d1f] ${isLast ? '' : 'force-page-break'}`}
+                                    style={{ width: '210mm', minWidth: '210mm', height: '297mm', minHeight: '297mm', maxHeight: '297mm', padding: '15mm', transform: `scale(${scale})`, transformOrigin: 'top center' }}>
+                                    {watermark}
+                                    <div className="relative z-10 flex flex-col w-full h-full flex-1">
+                                        {renderHeader(pageIdx + 1)}
+                                        {renderBillTo()}
+                                        <div className="flex-1 min-h-[140px] w-full print-overflow-visible">
+                                            <table className="w-full text-[10px] border-collapse">
+                                                {renderTableHead()}
+                                                <tbody>{rowIdxs.map((i) => renderRow(purchasedItems[i], i))}</tbody>
+                                            </table>
+                                            {isLast && renderSummary()}
+                                            {isLast && renderTail()}
                                         </div>
+                                        {renderSignatures()}
                                     </div>
-                                    <div className="flex items-center justify-between gap-6">
-                                        <div className="text-right">
-                                            <h2 className="text-[24px] font-black text-[#007aff] tracking-widest uppercase leading-none mb-1.5">INVOICE</h2>
-                                            <div className="flex flex-col gap-[2px] text-[10px] text-gray-800 font-medium">
-                                                <div className="flex justify-end gap-2"><span className="text-gray-500 uppercase tracking-widest text-[8px] font-bold">Invoice No:</span><span className="font-bold">{invoiceId}</span></div>
-                                                <div className="flex justify-end gap-2"><span className="text-gray-500 uppercase tracking-widest text-[8px] font-bold">Date:</span><span className="font-bold">{date}</span></div>
-                                            </div>
-                                        </div>
-                                        <div className="border border-gray-300 p-1.5 bg-white rounded shadow-sm shrink-0">
-                                            <img src={window.IconAPI.apiUrl(`/api/v1/qr?size=80&data=${encodeURIComponent(getInvoiceLink(invoiceId))}`)} alt="QR" onLoad={() => setQrLoaded(true)} onError={() => setQrLoaded(true)} className="w-[55px] h-[55px] object-contain" />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Bill To & Payment */}
-                                <div className="shrink-0 flex justify-between items-start mb-6 gap-4">
-                                    <div className="flex flex-col text-gray-900 leading-tight">
-                                        <h3 className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">Bill To</h3>
-                                        <span className="text-[19px] font-black mb-1 tracking-tight">{clientName}</span>
-                                        <span className="text-[11px] font-semibold text-gray-600">{clientPhone}</span>
-                                        {clientEmail && <span className="text-[11px] font-semibold text-gray-600">{clientEmail}</span>}
-                                    </div>
-                                    <div className="text-right">
-                                        <h3 className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">Payment Method</h3>
-                                        <span className="text-[19px] font-black text-[#007aff] uppercase mt-1 block tracking-tight">{paymentMethod}</span>
-                                    </div>
-                                </div>
-
-                                {/* Items Table */}
-                                <div className="flex-1 min-h-[140px] w-full print-overflow-visible">
-                                    <table className="w-full text-[10px] border-collapse">
-                                        <thead>
-                                            <tr className="border-b-2 border-gray-200 text-gray-900">
-                                                <th className="py-2 text-left font-black w-[35%] uppercase tracking-widest text-[8.5px] text-gray-500">Description</th>
-                                                <th className="py-2 text-left font-black w-[25%] uppercase tracking-widest text-[8.5px] text-gray-500">Serial / ID</th>
-                                                <th className="py-2 text-left font-black w-[20%] uppercase tracking-widest text-[8.5px] text-gray-500">Warranty</th>
-                                                <th className="py-2 text-center font-black w-[5%] uppercase tracking-widest text-[8.5px] text-gray-500">Qty</th>
-                                                <th className="py-2 text-right font-black w-[15%] uppercase tracking-widest text-[8.5px] text-gray-500">Price (LKR)</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {purchasedItems?.map((item, idx) => {
-                                                const itemDiscount = safePrice(item?.itemDiscount);
-                                                const basePrice = safePrice(item?.Price || item?.sellPrice);
-                                                const extPrice = safePrice(item?.warranty?.extendedPrice);
-                                                
-                                                const hasSoft = item?.warranty?.software && item.warranty.software !== 'None' && item.warranty.software !== '';
-                                                const hasGlob = item?.warranty?.global && item.warranty.global !== 'None' && item.warranty.global !== '';
-                                                const hasExt = item?.warranty?.extended && item.warranty.extended !== 'None' && item.warranty.extended !== '';
-                                                const hasAc = item?.warranty?.appleCare && item.warranty.appleCare !== 'None' && item.warranty.appleCare !== '';
-                                                const noWarrantyAtAll = !hasSoft && !hasGlob && !hasExt && !hasAc;
-
-                                                const formatW = (label, val, price = 0, isExt = false) => {
-                                                    if (!val || val === "None" || val === "") return null;
-                                                    let displayVal = val;
-                                                    return (
-                                                        <div key={label} className="leading-tight mb-0.5 flex items-start gap-1">
-                                                            {isExt && <span className="text-gray-400 shrink-0 inline-flex mt-[1px]"><Icons.Shield className="w-2.5 h-2.5" /></span>}
-                                                            <div><span className="text-gray-500 font-semibold">{label}:</span> <strong className="font-bold">{displayVal}</strong></div>
-                                                        </div>
-                                                    );
-                                                };
-
-                                                return (
-                                                    <tr key={idx} className="border-b border-gray-100 align-top text-gray-900">
-                                                        <td className="py-3 pr-2">
-                                                            <div className={`font-bold text-[12px] tracking-tight leading-tight mb-1 ${item?.isExchange ? 'text-green-600' : 'text-gray-900'}`}>
-                                                                {item?.isExchange && <span className="mr-1 text-[8.5px] font-black bg-green-100 text-green-700 px-1.5 py-0.5 rounded border border-green-200 uppercase tracking-widest">Exchange In</span>}
-                                                                {item?.Brand} {item?.Model}
-                                                            </div>
-                                                            {!item?.isExchange && <div className="text-[9.5px] text-gray-500 font-medium">{formatSpecsForPdf(item?.Specs)} {item?.Color ? `| ${item.Color}` : ''}</div>}
-                                                            {item?.isExchange && <div className="text-[9.5px] text-gray-500 font-medium mt-0.5">{formatSpecsForPdf(item?.Specs)}</div>}
-                                                        </td>
-                                                        <td className="py-3 pr-2 font-mono text-[10.5px] break-all leading-tight font-semibold text-gray-700">{item?.displayImei || item?.["IMEI or Item Code"] || item?.originalCode}</td>
-                                                        <td className="py-3 pr-2">
-                                                            {!item?.isExchange ? (
-                                                                <div className="flex flex-col text-[8.5px] leading-snug">
-                                                                    {formatW("Software", item?.warranty?.software)}
-                                                                    {formatW("Warranty", item?.warranty?.global)}
-                                                                    {formatW("Extended", item?.warranty?.extended, item?.warranty?.extendedPrice, true)}
-                                                                    {formatW("Apple Care", item?.warranty?.appleCare)}
-                                                                    {noWarrantyAtAll && <span className="text-[8.5px] text-gray-400 font-semibold italic">No Warranty Issued</span>}
-                                                                </div>
-                                                            ) : (
-                                                                <span className="text-[8.5px] text-gray-400 italic">N/A</span>
-                                                            )}
-                                                        </td>
-                                                        <td className="py-3 text-center font-bold text-[12px]">{item?.cartQty || item?.Quantity || 1}</td>
-                                                        <td className="py-3 pl-2 text-right">
-                                                            {item?.isExchange ? (
-                                                                <span className="font-bold text-green-600 text-[12px]">- {formatMoney(basePrice)}</span>
-                                                            ) : itemDiscount > 0 ? (
-                                                                <div className="flex flex-col items-end leading-tight">
-                                                                    <span className="text-[8.5px] text-red-500 line-through font-bold">{formatMoney(basePrice + extPrice)}</span>
-                                                                    <span className="font-bold text-[12px]">{formatMoney(basePrice + extPrice - itemDiscount)}</span>
-                                                                </div>
-                                                            ) : (
-                                                                <span className="font-bold text-[12px]">{formatMoney(basePrice + extPrice)}</span>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                {/* Summary */}
-                                <div className="flex justify-end mb-6 shrink-0 mt-4">
-                                    <div className="w-64 border-t-2 border-gray-900 pt-2">
-                                        <div className="flex justify-between text-[11.5px] font-medium text-gray-600 mb-1">
-                                            <span className="uppercase tracking-widest text-[9px] font-bold text-gray-400">Total Quantity:</span>
-                                            <span className="font-bold text-gray-900">{totalQuantity}</span>
-                                        </div>
-                                        <div className="flex justify-between text-[11.5px] font-medium text-gray-600 mb-1">
-                                            <span className="uppercase tracking-widest text-[9px] font-bold text-gray-400">Base Subtotal:</span>
-                                            <span className="font-bold text-gray-900">LKR {formatMoney(baseSubTotal)}</span>
-                                        </div>
-                                        {totalWarrantyCost > 0 && (
-                                            <div className="flex justify-between text-[11.5px] font-bold text-blue-600 mb-1">
-                                                <span className="uppercase tracking-widest text-[9px]">Ext. Warranty:</span>
-                                                <span>+ LKR {formatMoney(totalWarrantyCost)}</span>
-                                            </div>
-                                        )}
-                                        {totalExchangeValue > 0 && (
-                                            <div className="flex justify-between text-[11.5px] font-bold text-green-600 mb-1">
-                                                <span className="uppercase tracking-widest text-[9px]">Exchange Value:</span>
-                                                <span>- LKR {formatMoney(totalExchangeValue)}</span>
-                                            </div>
-                                        )}
-                                        {displayDiscount > 0 && (
-                                            <div className="flex justify-between text-[11.5px] font-bold text-red-500 mb-1">
-                                                <span className="uppercase tracking-widest text-[9px]">Discount:</span>
-                                                <span>- LKR {formatMoney(displayDiscount)}</span>
-                                            </div>
-                                        )}
-                                        <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-gray-200 relative">
-                                            <span className="text-[10.5px] font-black text-gray-900 uppercase tracking-widest">Grand Total:</span>
-                                            <div className="flex items-center gap-2">
-                                                <span className={`text-[17px] font-black tracking-tighter ${computedGrandTotal < 0 ? 'text-green-600' : 'text-gray-900'}`}>
-                                                    {computedGrandTotal < 0 ? '+ LKR ' : 'LKR '} {formatMoney(Math.abs(computedGrandTotal))}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Footer Data */}
-                                <div className="flex flex-row print-row gap-8 mt-auto shrink-0 text-[9px] text-gray-800 items-stretch pt-4">
-                                    <div className="w-[45%] print-w-45 flex flex-col justify-between self-stretch">
-                                        <div className="flex flex-col gap-4">
-                                            <div className="flex flex-col gap-3">
-                                                <div className="flex items-center gap-3">
-                                                    <img src="/assets/images/Google reviews.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display='none'} />
-                                                    <div>
-                                                        <div className="flex items-center gap-1.5 mb-0.5">
-                                                            <img src="/assets/images/Google.png" alt="G" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display='none'} />
-                                                            <span className="font-black text-[8.5px] text-gray-900 uppercase tracking-widest">Review us on Google</span>
-                                                        </div>
-                                                        <p className="text-[8px] font-medium text-gray-500 leading-tight">Scan the QR code to share your experience!</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-3">
-                                                    <img src="/assets/images/Map Qr.png" alt="QR" className="w-[42px] h-[42px] object-contain rounded-lg border border-gray-200" onError={(e) => e.target.style.display='none'} />
-                                                    <div>
-                                                        <div className="flex items-center gap-1.5 mb-0.5">
-                                                            <img src="/assets/images/googlemap.png" alt="Map" className="w-[12px] h-[12px] object-contain" onError={(e) => e.target.style.display='none'} />
-                                                            <span className="font-black text-[8.5px] text-gray-900 uppercase tracking-widest">Find Us on Map</span>
-                                                        </div>
-                                                        <p className="text-[8px] font-medium text-gray-500 leading-tight">Scan the QR code to get directions to our store!</p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-8 mt-16">
-                                            <div className="flex-1 border-t border-gray-400 pt-1.5 text-center">
-                                                <span className="font-black text-[8px] text-gray-400 uppercase tracking-widest">Client Signature</span>
-                                            </div>
-                                            <div className="flex-1 border-t border-gray-400 pt-1.5 text-center">
-                                                <span className="font-black text-[8px] text-gray-400 uppercase tracking-widest">Authorized Signature</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="w-[55%] print-w-55 relative flex flex-col justify-end">
-                                        <div className="absolute inset-0 flex items-center justify-center opacity-[0.05] pointer-events-none z-0">
-                                            <img src="/assets/images/warranty.png" alt="" className="w-full object-contain" onError={(e) => e.target.style.display='none'} />
-                                        </div>
-                                        <div className="relative z-10 flex flex-col gap-4">
-                                            {itemsWithWarranty.length > 0 && (
-                                                <div>
-                                                    <h4 className="font-black text-[9px] uppercase tracking-widest text-gray-400 mb-1.5 block">Warranty Expiry Dates</h4>
-                                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                                                        {itemsWithWarranty.map((item, idx) => {
-                                                            return (
-                                                                <div key={idx} className="text-[8px] leading-tight font-medium text-gray-700">
-                                                                    <span className="font-bold text-gray-900 block mb-0.5 text-[8.5px]">ID: {item.displayImei || item["IMEI or Item Code"] || item.originalCode}</span>
-                                                                    <div className="flex flex-col gap-[1px]">
-                                                                        {item.warranty?.software && item.warranty.software !== 'None' && <div><span className="text-gray-500">Software:</span> <span className="font-bold">{item.warranty.softwareEnd || item.warranty.software}</span></div>}
-                                                                        {item.warranty?.global && item.warranty.global !== 'None' && <div><span className="text-gray-500">General:</span> <span className="font-bold">{item.warranty.globalEnd || item.warranty.global}</span></div>}
-                                                                        {item.warranty?.extended && item.warranty.extended !== 'None' && <div><span className="text-gray-500">Ext. Warranty:</span> <span className="font-bold">{item.warranty.extendedEnd || item.warranty.extended}</span></div>}
-                                                                        {item.warranty?.appleCare && item.warranty.appleCare !== 'None' && <div><span className="text-gray-500">Apple Care:</span> <span className="font-bold">{item.warranty.appleCareEnd || item.warranty.appleCare}</span></div>}
-                                                                    </div>
-                                                                </div>
-                                                            )
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {purchasedItems.length <= 5 && (
-                                                <div className="text-[7.5px] leading-[1.25] text-gray-600 text-justify font-medium">
-                                                    <h4 className="font-black text-[8px] uppercase tracking-widest text-gray-400 mb-1 block">Terms of Sale and Warranty</h4>
-                                                    <ol className="list-decimal pl-3 space-y-[1px] mb-1">
-                                                        <li>Warranty is valid only when the product is used under normal operating conditions.</li>
-                                                        <li>Display, Face ID, and Fingerprint ID issues are not covered under warranty.</li>
-                                                        <li>Physical damage such as cracks, dents, scratches, or signs of impact/dropping are not covered.</li>
-                                                        <li>Liquid or water damage, or any signs of moisture inside the device, are not covered.</li>
-                                                        <li>If the warranty sticker is missing, tampered with, or replaced, the warranty is void.</li>
-                                                        <li>Warranty claims require the device to be in a working (power-on) condition.</li>
-                                                        <li>Claims will not be accepted after the warranty period has expired.</li>
-                                                    </ol>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="text-right mt-3 pt-2 border-t border-gray-200 shrink-0 relative z-10">
-                                    <span className="text-[6.5px] font-black text-gray-400 tracking-widest uppercase">Invoice issued by Hich Web Solutions 0714112113</span>
                                 </div>
                             </div>
-                        </div>
-                    </div>
+                        );
+                    })}
                 </div>
             );
         };
@@ -664,7 +593,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
             ReactDOM.render(<ErrorBoundary><App /></ErrorBoundary>, mountNode);
         }
         document.body.classList.add('app-mounted');
-    
+
 } catch (err) {
   if (window.__ICON_BOOT_ERROR__) window.__ICON_BOOT_ERROR__(err && (err.stack || err.message) || err);
   else throw err;

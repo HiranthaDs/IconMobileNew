@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "icon-mobile-shell-v6";
+const CACHE_NAME = "icon-mobile-shell-v7";
 const SHELL_FILES = [
   "/",
   "/index.html",
@@ -10,6 +10,7 @@ const SHELL_FILES = [
   "/settings.html",
   "/scanner.html",
   "/B2Binvoice.html",
+  "/B2Bbill.html",
   "/assets/css/app.css",
   "/assets/js/local-api.js",
   "/assets/js/vendor/react.production.min.js",

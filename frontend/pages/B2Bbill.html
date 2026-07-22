@@ -15,22 +15,26 @@
         :root { --bg:#f8fafc; --ink:#0f172a; }
         * { box-sizing:border-box; }
         body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,sans-serif; -webkit-font-smoothing:antialiased; }
+        .mono { font-family:'JetBrains Mono', monospace; }
+        .tracking-tightest { letter-spacing: -0.04em; }
         @media print {
             @page { size: A4 portrait; margin: 0; }
             html, body {
-                width: 210mm !important; height: 297mm !important; max-height: 297mm !important;
-                background-color: #ffffff !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important;
+                width: 210mm !important;
+                background-color: #ffffff !important; margin: 0 !important; padding: 0 !important;
                 -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
             }
             .no-print { display: none !important; }
-            .invoice-wrapper { display: block !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; background: none !important; }
+            .invoice-wrapper { display: block !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; min-height: 0 !important; background: none !important; }
+            .page-shell { display: block !important; height: auto !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; }
             .invoice-page {
                 width: 210mm !important; height: 297mm !important; max-height: 297mm !important;
                 background-color: #ffffff !important; box-shadow: none !important; margin: 0 !important;
-                padding: 12mm 15mm !important; border-radius: 0 !important; position: absolute !important;
-                top: 0 !important; left: 0 !important; display: flex !important; flex-direction: column !important;
-                page-break-after: avoid !important; page-break-inside: avoid !important; transform: none !important;
+                padding: 12mm 15mm !important; border-radius: 0 !important; position: relative !important;
+                display: flex !important; flex-direction: column !important; overflow: hidden !important;
+                page-break-inside: avoid !important; break-inside: avoid !important; transform: none !important;
             }
+            .force-page-break { page-break-after: always !important; break-after: page !important; }
             .print-row { flex-direction: row !important; }
             .print-w-45 { width: 45% !important; }
             .print-w-55 { width: 55% !important; }
@@ -121,13 +125,11 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
             if (!Array.isArray(items)) items = [];
             const invoiceId = String(record.invoiceId || nested.invoiceId || record.id || '').trim();
             if (!invoiceId) return null;
-            return {
-                ...record,
-                invoiceId,
-                client: { ...nested, name: nested.name || record.name || 'Partner', phone: nested.phone || record.phone || '' },
-                items,
-            };
+            return { ...record, invoiceId, client: { ...nested, name: nested.name || record.name || 'Partner', phone: nested.phone || record.phone || '' }, items };
         };
+
+        // A4 content area in CSS px (297mm - 2x15mm = 267mm at 96dpi). Slightly conservative.
+        const PAGE_PX = 1000;
 
         const App = () => {
             const [data, setData] = useState(null);
@@ -138,30 +140,21 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
             useEffect(() => {
                 const updateScale = () => {
                     if (window.matchMedia('print').matches) { setScale(1); return; }
-                    const screenWidth = window.innerWidth;
-                    const pageWidthPx = 794;
-                    setScale(screenWidth < pageWidthPx + 32 ? (screenWidth - 24) / pageWidthPx : 1);
+                    const w = window.innerWidth; const pageW = 794;
+                    setScale(w < pageW + 32 ? (w - 24) / pageW : 1);
                 };
                 updateScale();
                 window.addEventListener('resize', updateScale);
-                const printQuery = window.matchMedia('print');
-                if (printQuery.addEventListener) printQuery.addEventListener('change', updateScale);
-                else printQuery.addListener(updateScale);
-                return () => {
-                    window.removeEventListener('resize', updateScale);
-                    if (printQuery.removeEventListener) printQuery.removeEventListener('change', updateScale);
-                    else printQuery.removeListener(updateScale);
-                };
+                const pq = window.matchMedia('print');
+                if (pq.addEventListener) pq.addEventListener('change', updateScale); else pq.addListener(updateScale);
+                return () => { window.removeEventListener('resize', updateScale); if (pq.removeEventListener) pq.removeEventListener('change', updateScale); else pq.removeListener(updateScale); };
             }, []);
 
             const fetchInvoice = useCallback(async (silent = false) => {
                 if (!silent) { setLoading(true); setError(""); }
                 const urlParams = new URLSearchParams(window.location.search);
                 const targetId = String(urlParams.get('id') || urlParams.get('invoice') || urlParams.get('invoiceId') || '').trim();
-                if (!targetId) {
-                    if (!silent) { setError("No Invoice ID provided in the link."); setLoading(false); }
-                    return;
-                }
+                if (!targetId) { if (!silent) { setError("No Invoice ID provided in the link."); setLoading(false); } return; }
                 try {
                     const result = await window.IconAPI.getInvoice(targetId);
                     if (!result || result.success !== true) throw new Error(result?.error || result?.message || 'Invoice request failed.');
@@ -173,9 +166,7 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
                     document.title = `B2B_Invoice_${normalized.invoiceId}`;
                 } catch (e) {
                     console.error('B2B invoice load failed:', e);
-                    setError(e?.code === 'invoice_not_found'
-                        ? `Invoice ${targetId} was not found. It may have been deleted by an administrator.`
-                        : `Failed to load this invoice: ${e.message || e}`);
+                    setError(e?.code === 'invoice_not_found' ? `Invoice ${targetId} was not found. It may have been deleted by an administrator.` : `Failed to load this invoice: ${e.message || e}`);
                 }
                 if (!silent) setLoading(false);
             }, []);
@@ -190,7 +181,6 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
                     </div>
                 );
             }
-
             if (error || !data) {
                 return (
                     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
@@ -204,7 +194,10 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
                 );
             }
 
-            const { client, items, invoiceId, transactionType } = data;
+            const client = data.client || {};
+            const items = Array.isArray(data.items) ? data.items : [];
+            const invoiceId = data.invoiceId || "";
+            const transactionType = data.transactionType;
             const total = n(data.total);
             const subTotal = n(data.subTotal);
             const discount = n(data.discount);
@@ -217,145 +210,170 @@ if (!window.IconAPI) { throw new Error('Local API client did not load.'); }
             const qrUrl = window.IconAPI.apiUrl(`/api/v1/qr?size=150&data=${encodeURIComponent(pageLink)}`);
             const barcodeUrl = window.IconAPI.apiUrl(`/api/v1/barcode?text=${encodeURIComponent(invoiceId)}`);
 
+            // ---- Deterministic pagination (no DOM measurement) ----
+            const rowPx = (item) => 26 + (clean(item.warrantyText) ? 16 : 0); // ~42px, +16 if warranty note
+            const rows = items.map(rowPx);
+            const nRows = rows.length;
+
+            const HEADER = 100, BILLTO = 60, STRIP = 52, THEAD = 28, FOOTER = 92;
+            const contOverhead = HEADER + BILLTO + STRIP + THEAD + FOOTER;
+            const contBudget = PAGE_PX - contOverhead;
+            const SUMMARY = 120;
+            const lastBudget = Math.max(PAGE_PX - (contOverhead + SUMMARY), 120);
+
+            const pages = [];
+            {
+                let i = 0;
+                while (i < nRows) {
+                    let remaining = 0; for (let k = i; k < nRows; k++) remaining += rows[k];
+                    if (remaining <= lastBudget) { const c = []; for (let k = i; k < nRows; k++) c.push(k); pages.push(c); i = nRows; break; }
+                    let h = 0; const chunk = [];
+                    while (i < nRows && (chunk.length === 0 || h + rows[i] <= contBudget)) { h += rows[i]; chunk.push(i); i++; }
+                    if (i >= nRows && chunk.length > 1) { const moved = chunk.pop(); i = moved; }
+                    pages.push(chunk);
+                }
+                if (pages.length === 0) pages.push([]);
+            }
+            const totalPages = pages.length;
+
+            const renderHeader = (pageNum) => (
+                <div className="shrink-0 flex flex-row print-row justify-between items-start border-b-2 border-slate-900 pb-4 mb-4 gap-4">
+                    <div className="flex items-center gap-4">
+                        <img src="/assets/images/logo.png" alt="Logo" className="h-[55px] w-[55px] object-contain rounded-xl" onError={(e) => e.target.style.display = 'none'} />
+                        <div className="leading-tight">
+                            <h1 className="text-[26px] font-black text-slate-900 tracking-tighter uppercase mb-0.5">ICON MOBILE</h1>
+                            <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">B2B Wholesale Division</p>
+                            <p className="text-[10px] font-semibold text-slate-500">No:59, First Floor, Liberty Plaza, Colombo 03</p>
+                            <p className="text-[10px] font-semibold text-slate-500">0772729226 / 0701442299</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-5">
+                        <div className="text-right">
+                            <h2 className="text-[22px] font-black text-blue-600 tracking-widest uppercase leading-none mb-1.5">{docTitle}</h2>
+                            <div className="flex flex-col gap-[2px] text-[10px] text-slate-800 font-medium">
+                                <div className="flex justify-end gap-2"><span className="text-slate-500 uppercase tracking-widest text-[8px] font-bold">Invoice No:</span><span className="font-bold">{invoiceId}</span></div>
+                                <div className="flex justify-end gap-2"><span className="text-slate-500 uppercase tracking-widest text-[8px] font-bold">Date:</span><span className="font-bold">{dateText}</span></div>
+                                {totalPages > 1 && <div className="flex justify-end gap-2"><span className="text-slate-500 uppercase tracking-widest text-[8px] font-bold">Page:</span><span className="font-bold">{pageNum} / {totalPages}</span></div>}
+                            </div>
+                        </div>
+                        <div className="border border-slate-200 p-1 bg-white rounded shadow-sm shrink-0">
+                            <img src={qrUrl} alt="QR" className="w-[55px] h-[55px] object-contain" crossOrigin="anonymous" />
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderBillTo = () => (
+                <div className="shrink-0 flex justify-between items-start mb-4 gap-4">
+                    <div className="flex flex-col text-slate-900 leading-tight">
+                        <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Billed To Partner</h3>
+                        <span className="text-[19px] font-black mb-1 tracking-tight">{client.name}</span>
+                        <span className="text-[11px] font-semibold text-slate-600">{client.phone}</span>
+                    </div>
+                    <div className="text-right">
+                        <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Payment Method</h3>
+                        <span className={`text-[19px] font-black uppercase mt-1 block tracking-tight ${isCredit ? 'text-red-600' : 'text-blue-600'}`}>{client.paymentMethod}</span>
+                    </div>
+                </div>
+            );
+
+            const renderStrip = () => (
+                <div className="shrink-0 grid grid-cols-4 gap-4 border-t border-b border-slate-200 py-2.5 mb-5">
+                    <div><p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Total Value</p><p className="text-[13px] font-black text-slate-900">LKR {money(total)}</p></div>
+                    <div><p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Amount Paid</p><p className="text-[13px] font-black text-emerald-600">LKR {money(client.paymentAmount)}</p></div>
+                    <div><p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Balance Due</p><p className={`text-[13px] font-black ${balance > 0 ? "text-red-600" : "text-emerald-600"}`}>LKR {money(balance)}</p></div>
+                    <div><p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Total Items</p><p className="text-[13px] font-black text-slate-900">{items.length}</p></div>
+                </div>
+            );
+
+            const renderTableHead = () => (
+                <thead>
+                    <tr className="border-b-2 border-slate-200 text-slate-900">
+                        <th className="py-2 text-left font-black w-[40%] uppercase tracking-widest text-[8.5px] text-slate-500">Item Description</th>
+                        <th className="py-2 text-left font-black w-[30%] uppercase tracking-widest text-[8.5px] text-slate-500">IMEI / Serial</th>
+                        <th className="py-2 text-center font-black w-[5%] uppercase tracking-widest text-[8.5px] text-slate-500">Qty</th>
+                        <th className="py-2 text-right font-black w-[25%] uppercase tracking-widest text-[8.5px] text-slate-500">Price (LKR)</th>
+                    </tr>
+                </thead>
+            );
+
+            const renderRow = (item, idx) => {
+                const qty = n(item.cartQty) || 1;
+                const price = n(item.finalPrice || item.Price || item.sellPrice || item.wholesalePrice || item.OfferPrice);
+                return (
+                    <tr key={idx} className="border-b border-slate-100 align-top text-slate-900">
+                        <td className="py-2 pr-2">
+                            <div className="font-bold text-[12px] tracking-tight leading-tight">{item.Brand} {item.Model}</div>
+                            {clean(item.warrantyText) && <div className="text-[9px] text-slate-500 font-medium mt-0.5">Warranty: {clean(item.warrantyText)}</div>}
+                        </td>
+                        <td className="py-2 pr-2 font-mono text-[10.5px] break-all leading-tight font-semibold text-slate-700">{item.displayImei || item.IMEI}</td>
+                        <td className="py-2 text-center font-bold text-[12px]">{qty}</td>
+                        <td className="py-2 pl-2 text-right font-bold text-[12px] tracking-tight">{money(price * qty)}</td>
+                    </tr>
+                );
+            };
+
+            const renderSummary = () => (
+                <div className="shrink-0 flex justify-end mb-4 mt-4">
+                    <div className="w-64 border-t-2 border-slate-900 pt-2">
+                        <div className="flex justify-between text-[11.5px] font-medium text-slate-600 mb-1"><span className="uppercase tracking-widest text-[9px] font-bold text-slate-400">Subtotal:</span><span className="font-bold text-slate-900">LKR {money(subTotal)}</span></div>
+                        {discount > 0 && <div className="flex justify-between text-[11.5px] font-bold text-red-500 mb-1"><span className="uppercase tracking-widest text-[9px]">Discount:</span><span>- LKR {money(discount)}</span></div>}
+                        <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-slate-200"><span className="text-[10.5px] font-black text-slate-900 uppercase tracking-widest">Total:</span><span className="text-[17px] font-black text-slate-900 tracking-tighter">LKR {money(total)}</span></div>
+                    </div>
+                </div>
+            );
+
+            const renderFooter = () => (
+                <div className="shrink-0 flex flex-row print-row gap-8 text-[9px] text-slate-800 items-end pt-3 border-t border-slate-100">
+                    <div className="w-[45%] print-w-45 flex flex-col justify-end">
+                        <img src={barcodeUrl} alt="Barcode" className="h-8 object-contain mb-3 opacity-80" crossOrigin="anonymous" />
+                        <div className="flex gap-8">
+                            <div className="flex-1 border-t border-slate-300 pt-1.5 text-center"><span className="font-black text-[8px] text-slate-400 uppercase tracking-widest">Partner Signature</span></div>
+                            <div className="flex-1 border-t border-slate-300 pt-1.5 text-center"><span className="font-black text-[8px] text-slate-400 uppercase tracking-widest">Authorized Signature</span></div>
+                        </div>
+                    </div>
+                    <div className="w-[55%] print-w-55 flex items-end justify-end">
+                        <p className="text-[6.5px] font-black text-slate-400 uppercase tracking-widest text-right leading-relaxed">System generated strictly from local master ledger data.<br />© ICON MOBILE.</p>
+                    </div>
+                </div>
+            );
+
             return (
                 <div className="min-h-screen pt-4 pb-[100px] flex flex-col items-center invoice-wrapper">
                     <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:absolute sm:top-6 sm:right-6 sm:bottom-auto flex flex-row gap-3 no-print z-50">
                         <button onClick={() => fetchInvoice(false)} className="flex items-center justify-center w-12 h-12 bg-white border border-gray-200 text-gray-700 hover:text-blue-600 rounded-xl sm:rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:bg-gray-50 transition-all hover:-translate-y-0.5" title="Refresh Invoice Data">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                         </button>
-                        <button onClick={() => window.print()} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-900 hover:bg-black text-white px-6 py-3 rounded-xl sm:rounded-full shadow-[0_8px_20px_rgba(15,23,42,0.4)] transition-transform hover:-translate-y-0.5 font-bold text-sm border-none cursor-pointer">
+                        <button onClick={() => window.print()} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-900 hover:bg-black text-white px-6 py-3 rounded-xl sm:rounded-full shadow-[0_8px_20px_rgba(15,23,42,0.3)] transition-transform hover:-translate-y-0.5 font-bold text-sm border-none cursor-pointer">
                             <Icons.Print /> Save PDF
                         </button>
                     </div>
 
                     <p className="text-gray-500 text-[10px] sm:text-xs font-semibold uppercase tracking-widest mb-4 mt-2 no-print text-center w-full">
-                        Official Digital Document
+                        Official Digital Document{totalPages > 1 ? ` — ${totalPages} pages` : ''}
                     </p>
 
-                    <div className="w-full flex justify-center print-overflow-visible overflow-hidden" style={{ height: `calc(${297 * scale}mm + 40px)` }}>
-                        <div
-                            id="printable-document"
-                            className="invoice-page shrink-0 relative bg-white shadow-2xl print:shadow-none box-border flex flex-col overflow-hidden text-[13px] text-slate-900"
-                            style={{ width: '210mm', minWidth: '210mm', height: '297mm', minHeight: '297mm', maxHeight: '297mm', padding: '15mm', transform: `scale(${scale})`, transformOrigin: 'top center' }}
-                        >
-                            <div className="shrink-0 flex flex-row print-row justify-between items-start border-b-2 border-slate-900 pb-4 mb-4 gap-4">
-                                <div className="flex items-center gap-4">
-                                    <img src="/assets/images/logo.png" alt="Logo" className="h-[55px] w-[55px] object-contain rounded-xl" onError={(e) => e.target.style.display = 'none'} />
-                                    <div className="leading-tight">
-                                        <h1 className="text-[26px] font-black text-slate-900 tracking-tighter uppercase mb-0.5">ICON MOBILE</h1>
-                                        <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">B2B Wholesale Division</p>
-                                        <p className="text-[10px] font-semibold text-slate-500">No:59, First Floor, Liberty Plaza, Colombo 03</p>
-                                        <p className="text-[10px] font-semibold text-slate-500">0772729226 / 0701442299</p>
+                    {pages.map((rowIdxs, pageIdx) => {
+                        const isLast = pageIdx === totalPages - 1;
+                        return (
+                            <div key={pageIdx} className="page-shell w-full flex justify-center print-overflow-visible overflow-hidden" style={{ height: `calc(${297 * scale}mm + 40px)`, marginBottom: isLast ? 0 : '24px' }}>
+                                <div className={`invoice-page shrink-0 relative bg-white shadow-2xl print:shadow-none box-border flex flex-col overflow-hidden text-[13px] text-slate-900 ${isLast ? '' : 'force-page-break'}`}
+                                    style={{ width: '210mm', minWidth: '210mm', height: '297mm', minHeight: '297mm', maxHeight: '297mm', padding: '15mm', transform: `scale(${scale})`, transformOrigin: 'top center' }}>
+                                    {renderHeader(pageIdx + 1)}
+                                    {renderBillTo()}
+                                    {renderStrip()}
+                                    <div className="flex-1 min-h-[140px] w-full print-overflow-visible">
+                                        <table className="w-full text-[10px] border-collapse">
+                                            {renderTableHead()}
+                                            <tbody>{rowIdxs.map((i) => renderRow(items[i], i))}</tbody>
+                                        </table>
+                                        {isLast && renderSummary()}
                                     </div>
-                                </div>
-                                <div className="flex items-center justify-between gap-5">
-                                    <div className="text-right">
-                                        <h2 className="text-[22px] font-black text-blue-600 tracking-widest uppercase leading-none mb-1.5">{docTitle}</h2>
-                                        <div className="flex flex-col gap-[2px] text-[10px] text-slate-800 font-medium">
-                                            <div className="flex justify-end gap-2"><span className="text-slate-500 uppercase tracking-widest text-[8px] font-bold">Invoice No:</span><span className="font-bold">{invoiceId}</span></div>
-                                            <div className="flex justify-end gap-2"><span className="text-slate-500 uppercase tracking-widest text-[8px] font-bold">Date:</span><span className="font-bold">{dateText}</span></div>
-                                        </div>
-                                    </div>
-                                    <div className="border border-slate-200 p-1 bg-white rounded shadow-sm shrink-0">
-                                        <img src={qrUrl} alt="QR" className="w-[55px] h-[55px] object-contain" crossOrigin="anonymous" />
-                                    </div>
+                                    {renderFooter()}
                                 </div>
                             </div>
-
-                            <div className="shrink-0 flex justify-between items-start mb-4 gap-4">
-                                <div className="flex flex-col text-slate-900 leading-tight">
-                                    <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Billed To Partner</h3>
-                                    <span className="text-[19px] font-black mb-1 tracking-tight">{client.name}</span>
-                                    <span className="text-[11px] font-semibold text-slate-600">{client.phone}</span>
-                                </div>
-                                <div className="text-right">
-                                    <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Payment Method</h3>
-                                    <span className={`text-[19px] font-black uppercase mt-1 block tracking-tight ${isCredit ? 'text-red-600' : 'text-blue-600'}`}>{client.paymentMethod}</span>
-                                </div>
-                            </div>
-
-                            <div className="shrink-0 grid grid-cols-4 gap-4 border-t border-b border-slate-200 py-2.5 mb-5">
-                                <div>
-                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Total Value</p>
-                                    <p className="text-[13px] font-black text-slate-900">LKR {money(total)}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Amount Paid</p>
-                                    <p className="text-[13px] font-black text-emerald-600">LKR {money(client.paymentAmount)}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Balance Due</p>
-                                    <p className={`text-[13px] font-black ${balance > 0 ? "text-red-600" : "text-emerald-600"}`}>LKR {money(balance)}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Total Items</p>
-                                    <p className="text-[13px] font-black text-slate-900">{items.length}</p>
-                                </div>
-                            </div>
-
-                            <div className="flex-1 min-h-[140px] w-full print-overflow-visible">
-                                <table className="w-full text-[10px] border-collapse">
-                                    <thead>
-                                        <tr className="border-b-2 border-slate-200 text-slate-900">
-                                            <th className="py-2 text-left font-black w-[40%] uppercase tracking-widest text-[8.5px] text-slate-500">Item Description</th>
-                                            <th className="py-2 text-left font-black w-[30%] uppercase tracking-widest text-[8.5px] text-slate-500">IMEI / Serial</th>
-                                            <th className="py-2 text-center font-black w-[5%] uppercase tracking-widest text-[8.5px] text-slate-500">Qty</th>
-                                            <th className="py-2 text-right font-black w-[25%] uppercase tracking-widest text-[8.5px] text-slate-500">Price (LKR)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {items.map((item, idx) => {
-                                            const qty = n(item.cartQty) || 1;
-                                            const price = n(item.finalPrice || item.Price || item.sellPrice || item.wholesalePrice || item.OfferPrice);
-                                            return (
-                                                <tr key={idx} className="border-b border-slate-100 align-top text-slate-900">
-                                                    <td className="py-2 pr-2">
-                                                        <div className="font-bold text-[12px] tracking-tight leading-tight">{item.Brand} {item.Model}</div>
-                                                        {clean(item.warrantyText) && <div className="text-[9px] text-slate-500 font-medium mt-0.5">Warranty: {clean(item.warrantyText)}</div>}
-                                                    </td>
-                                                    <td className="py-2 pr-2 font-mono text-[10.5px] break-all leading-tight font-semibold text-slate-700">{item.displayImei || item.IMEI}</td>
-                                                    <td className="py-2 text-center font-bold text-[12px]">{qty}</td>
-                                                    <td className="py-2 pl-2 text-right font-bold text-[12px] tracking-tight">{money(price * qty)}</td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <div className="shrink-0 flex justify-end mb-4 mt-4">
-                                <div className="w-64 border-t-2 border-slate-900 pt-2">
-                                    <div className="flex justify-between text-[11.5px] font-medium text-slate-600 mb-1">
-                                        <span className="uppercase tracking-widest text-[9px] font-bold text-slate-400">Subtotal:</span>
-                                        <span className="font-bold text-slate-900">LKR {money(subTotal)}</span>
-                                    </div>
-                                    {discount > 0 && (
-                                        <div className="flex justify-between text-[11.5px] font-bold text-red-500 mb-1">
-                                            <span className="uppercase tracking-widest text-[9px]">Discount:</span>
-                                            <span>- LKR {money(discount)}</span>
-                                        </div>
-                                    )}
-                                    <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-slate-200">
-                                        <span className="text-[10.5px] font-black text-slate-900 uppercase tracking-widest">Total:</span>
-                                        <span className="text-[17px] font-black text-slate-900 tracking-tighter">LKR {money(total)}</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="shrink-0 flex flex-row print-row gap-8 mt-auto text-[9px] text-slate-800 items-end pt-3 border-t border-slate-100">
-                                <div className="w-[45%] print-w-45 flex flex-col justify-end">
-                                    <img src={barcodeUrl} alt="Barcode" className="h-8 object-contain mb-3 opacity-80" crossOrigin="anonymous" />
-                                    <div className="flex gap-8">
-                                        <div className="flex-1 border-t border-slate-400 pt-1.5 text-center"><span className="font-black text-[8px] text-slate-400 uppercase tracking-widest">Partner Signature</span></div>
-                                        <div className="flex-1 border-t border-slate-400 pt-1.5 text-center"><span className="font-black text-[8px] text-slate-400 uppercase tracking-widest">Authorized Signature</span></div>
-                                    </div>
-                                </div>
-                                <div className="w-[55%] print-w-55 flex items-end justify-end">
-                                    <p className="text-[6.5px] font-black text-slate-400 uppercase tracking-widest text-right leading-relaxed">System generated strictly from local master ledger data.<br />© ICON MOBILE.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                        );
+                    })}
                 </div>
             );
         };
