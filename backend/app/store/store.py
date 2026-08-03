@@ -264,11 +264,12 @@ class PostgresStore:
         return {"canonical": canonical, "legacy": legacy, "specs": specs_object,
                 "price_cents": price_cents, "offer_cents": offer_cents}, units
 
-    def _product_to_dict(self, conn, product) -> dict:
-        units_rows = conn.execute(
-            "SELECT * FROM v2_units WHERE product_id=%s AND deleted=0 ORDER BY id",
-            (product["id"],),
-        ).fetchall()
+    def _product_to_dict(self, conn, product, units_rows=None) -> dict:
+        if units_rows is None:
+            units_rows = conn.execute(
+                "SELECT * FROM v2_units WHERE product_id=%s AND deleted=0 ORDER BY id",
+                (product["id"],),
+            ).fetchall()
         units = [{
             "imei": row["unit_code"],
             "supplier": row["supplier"],
@@ -315,7 +316,7 @@ class PostgresStore:
         })
         return base
 
-    def _transaction_to_dict(self, conn, row) -> dict:
+    def _transaction_to_dict(self, conn, row, items_rows=None) -> dict:
         value = json_object(row["raw_json"])
         value.setdefault("invoiceId", row["invoice_id"])
         value.setdefault("transactionType", row["transaction_type"])
@@ -330,6 +331,12 @@ class PostgresStore:
         value.setdefault("discount", cents_to_legacy(row["discount_cents"]))
         value.setdefault("total", cents_to_legacy(row["total_cents"]))
         value.setdefault("totalPrice", cents_to_legacy(row["total_cents"]))
+        if items_rows is None:
+            items_rows = conn.execute(
+                "SELECT unit_code,group_code,quantity,price_cents,discount_cents,cost_cents "
+                "FROM v2_transaction_items WHERE transaction_id=%s ORDER BY id",
+                (row["id"],),
+            ).fetchall()
         normalized_items = [
             {
                 "unitImei": item["unit_code"],
@@ -339,11 +346,7 @@ class PostgresStore:
                 "discount": cents_to_legacy(item["discount_cents"]),
                 "unitCost": cents_to_legacy(item["cost_cents"]),
             }
-            for item in conn.execute(
-                "SELECT unit_code,group_code,quantity,price_cents,discount_cents,cost_cents "
-                "FROM v2_transaction_items WHERE transaction_id=%s ORDER BY id",
-                (row["id"],),
-            ).fetchall()
+            for item in items_rows
         ]
         value["normalizedItems"] = normalized_items
         if not normalized_items:
@@ -556,8 +559,27 @@ class PostgresStore:
                 clients = conn.execute(
                     "SELECT * FROM v2_clients ORDER BY updated_at DESC, id DESC"
                 ).fetchall()
-                inventory = [self._product_to_dict(conn, product) for product in products]
-                ledger = [self._transaction_to_dict(conn, row) for row in transactions]
+                all_units = conn.execute(
+                    "SELECT * FROM v2_units WHERE deleted=0 ORDER BY product_id, id"
+                ).fetchall()
+                units_by_product: Dict[int, list] = {}
+                for unit in all_units:
+                    units_by_product.setdefault(unit["product_id"], []).append(unit)
+                all_items = conn.execute(
+                    "SELECT unit_code,group_code,quantity,price_cents,discount_cents,cost_cents,transaction_id "
+                    "FROM v2_transaction_items ORDER BY transaction_id, id"
+                ).fetchall()
+                items_by_transaction: Dict[int, list] = {}
+                for item in all_items:
+                    items_by_transaction.setdefault(item["transaction_id"], []).append(item)
+                inventory = [
+                    self._product_to_dict(conn, product, units_by_product.get(product["id"], []))
+                    for product in products
+                ]
+                ledger = [
+                    self._transaction_to_dict(conn, row, items_by_transaction.get(row["id"], []))
+                    for row in transactions
+                ]
                 contacts = [self._client_to_dict(row) for row in clients]
                 assets = self._asset_summary(conn)
                 conn.execute("COMMIT")
@@ -577,6 +599,89 @@ class PostgresStore:
             data["inventoryCsv"] = self._inventory_csv(inventory)
             data["clientsCsv"] = self._transactions_csv(ledger)
         return data
+
+    def summary(self) -> dict:
+        """Fast dashboard counts. Single small query instead of a full snapshot."""
+        with self.connection(read_only=True) as conn:
+            products = int(conn.execute(
+                "SELECT COUNT(*) FROM v2_products WHERE deleted=0"
+            ).fetchone()[0])
+            units = int(conn.execute(
+                "SELECT COUNT(*) FROM v2_units WHERE deleted=0"
+            ).fetchone()[0])
+            clients = int(conn.execute(
+                "SELECT COUNT(*) FROM v2_clients"
+            ).fetchone()[0])
+            transactions = int(conn.execute(
+                "SELECT COUNT(*) FROM v2_transactions"
+            ).fetchone()[0])
+            available_units = int(conn.execute(
+                "SELECT COUNT(*) FROM v2_units WHERE deleted=0 AND status='Available'"
+            ).fetchone()[0])
+            revision = self.current_revision(conn)
+        return {
+            "revision": revision,
+            "products": products,
+            "units": units,
+            "availableUnits": available_units,
+            "clients": clients,
+            "transactions": transactions,
+        }
+
+    def delta(self, since: int) -> dict:
+        """Return only the changed entities since the given revision.
+
+        Uses the existing v2_change_log table so clients only fetch what
+        changed instead of re-downloading the whole database.
+        """
+        since = int(since or 0)
+        if since < 0:
+            since = 0
+        with self.connection(read_only=True) as conn:
+            current = self.current_revision(conn)
+            if since >= current:
+                return {"revision": current, "changes": []}
+            changes = conn.execute(
+                "SELECT revision, action, entity_type, entity_id, created_at "
+                "FROM v2_change_log WHERE revision>%s ORDER BY revision",
+                (since,),
+            ).fetchall()
+            rows = []
+            for change in changes:
+                entity = None
+                if change["entity_type"] == "inventory":
+                    product = conn.execute(
+                        "SELECT * FROM v2_products WHERE sku=%s", (change["entity_id"],)
+                    ).fetchone()
+                    if product:
+                        entity = self._product_to_dict(conn, product)
+                elif change["entity_type"] == "transaction":
+                    row = conn.execute(
+                        "SELECT * FROM v2_transactions WHERE invoice_id=%s", (change["entity_id"],)
+                    ).fetchone()
+                    if row:
+                        entity = self._transaction_to_dict(conn, row)
+                elif change["entity_type"] == "client":
+                    row = conn.execute(
+                        "SELECT * FROM v2_clients WHERE id=%s", (change["entity_id"],)
+                    ).fetchone()
+                    if row:
+                        entity = self._client_to_dict(row)
+                elif change["entity_type"] == "transaction_item":
+                    row = conn.execute(
+                        "SELECT * FROM v2_transactions WHERE invoice_id=%s", (change["entity_id"],)
+                    ).fetchone()
+                    if row:
+                        entity = self._transaction_to_dict(conn, row)
+                rows.append({
+                    "revision": change["revision"],
+                    "action": change["action"],
+                    "entityType": change["entity_type"],
+                    "entityId": change["entity_id"],
+                    "createdAt": change["created_at"],
+                    "entity": entity,
+                })
+        return {"revision": current, "changes": rows}
 
     def get_invoice(self, invoice_id: str) -> dict:
         invoice_id = clean_text(invoice_id, maximum=180)

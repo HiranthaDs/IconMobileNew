@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: icon-mobile-erp
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: POS_PASSWORD
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: WHOLESALE_PASSWORD
+        sync: false

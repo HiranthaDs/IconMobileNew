@@ -236,17 +236,101 @@
     }
   }
 
+  function applyDeltaToSnapshot(cached, deltaResult) {
+    // Merge the changed entities into the cached snapshot so callers always
+    // receive one complete, up-to-date in-memory view without re-downloading
+    // the whole database.
+    if (!cached || typeof cached !== "object") return cached;
+    const data = cached.data && typeof cached.data === "object" ? cached.data : {};
+    const changes = deltaResult && Array.isArray(deltaResult.changes) ? deltaResult.changes : [];
+    for (const change of changes) {
+      const entity = change.entity;
+      if (!entity) continue;
+      if (change.entityType === "inventory") {
+        const inventory = Array.isArray(data.inventory) ? data.inventory : [];
+        const code = String(entity.code || entity["IMEI or Item Code"] || change.entityId || "");
+        const idx = inventory.findIndex(function (item) {
+          return String(item.code || item["IMEI or Item Code"] || "") === code;
+        });
+        if (change.action === "delete_item") {
+          if (idx >= 0) inventory.splice(idx, 1);
+        } else {
+          if (idx >= 0) inventory[idx] = entity;
+          else inventory.unshift(entity);
+        }
+        data.inventory = inventory;
+      } else if (change.entityType === "transaction") {
+        const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+        const invoiceId = String(entity.invoiceId || change.entityId || "");
+        const idx = transactions.findIndex(function (tx) {
+          return String(tx.invoiceId || tx.id || "") === invoiceId;
+        });
+        if (change.action === "delete_transaction") {
+          if (idx >= 0) transactions.splice(idx, 1);
+        } else {
+          if (idx >= 0) transactions[idx] = entity;
+          else transactions.unshift(entity);
+        }
+        data.transactions = transactions;
+      }
+    }
+    return { data: data };
+  }
+
   async function getSnapshot() {
-    // One in-flight snapshot per browser context prevents focus, WebSocket and
-    // post-action refreshes from racing and applying responses out of order.
+    // Smart loading: if we already have a cached snapshot, fetch only the
+    // changes since its revision (small delta) and merge them locally instead
+    // of re-downloading the whole database. This keeps the UI fast and
+    // prevents the full-snapshot timeout failure at scale.
     if (snapshotRequest) return snapshotRequest;
     snapshotRequest = (async function () {
-      let result = await request(`${API_ROOT}/snapshot`);
+      const cached = readCachedSnapshot();
+      const cachedRevision = Number(cached && cached.data && cached.data.revision || 0);
+
+      if (cachedRevision > 0) {
+        try {
+          const delta = await request(`${API_ROOT}/delta?since=${cachedRevision}`, { timeoutMs: 30000 });
+          const merged = applyDeltaToSnapshot(cached, delta && delta.data);
+          if (merged && merged.data) {
+            const revision = Number(delta && delta.data && delta.data.revision || cachedRevision);
+            merged.data.revision = revision;
+            cacheSnapshot(merged.data);
+            knownRevision = Math.max(knownRevision, revision);
+            return { success: true, data: merged.data };
+          }
+        } catch (_) {
+          // Delta failed; fall through to a cached snapshot above, or a full
+          // snapshot as a last resort. A brief network hiccup must never crash.
+        }
+      }
+
+      // The snapshot can be slow on a hosted database (many sequential queries
+      // over the network), so give it a generous timeout and retry a couple of
+      // times with backoff before giving up and falling back to the cache.
+      const attempts = [60000, 60000, 60000];
+      let result = null;
+      for (let attempt = 0; attempt < attempts.length; attempt++) {
+        try {
+          result = await request(`${API_ROOT}/snapshot`, { timeoutMs: attempts[attempt] });
+          break;
+        } catch (error) {
+          if (error && (error.code === "TIMEOUT" || error.code === "OFFLINE")) {
+            if (attempt < attempts.length - 1) {
+              await new Promise(function (resolve) { setTimeout(resolve, 1000 * Math.pow(2, attempt)); });
+              continue;
+            }
+            const snapshot = readCachedSnapshot();
+            if (snapshot && snapshot.data) return { success: true, data: snapshot.data, cached: true };
+            throw error;
+          }
+          throw error;
+        }
+      }
       let serverRevision = Number(result && result.data && result.data.revision || 0);
-      // A revision event may arrive while SQLite is preparing this snapshot.
+      // A revision event may arrive while the database is preparing this snapshot.
       // Chase it once so callers never paint an already-obsolete committed view.
       if (serverRevision < knownRevision) {
-        result = await request(`${API_ROOT}/snapshot`);
+        result = await request(`${API_ROOT}/snapshot`, { timeoutMs: 60000 });
         serverRevision = Number(result && result.data && result.data.revision || 0);
       }
       if (result && result.data) {
@@ -268,6 +352,11 @@
 
   async function getOperation(operationId) {
     return request(`${API_ROOT}/operations/${encodeURIComponent(operationId)}`);
+  }
+
+  async function getDelta(since) {
+    const revision = Number(since || 0);
+    return request(`${API_ROOT}/delta?since=${revision}`, { timeoutMs: 30000 });
   }
 
   async function action(payload) {
@@ -503,6 +592,7 @@
     apiUrl: apiUrl,
     cacheSnapshot: cacheSnapshot,
     createScannerHost: createScannerHost,
+    getDelta: getDelta,
     getDeviceId: getDeviceId,
     getInvoice: getInvoice,
     getOperation: getOperation,

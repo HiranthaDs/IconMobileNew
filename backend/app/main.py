@@ -48,7 +48,7 @@ ASSETS_DIR = FRONTEND_DIR / "assets"
 load_dotenv(PROJECT_ROOT / ".env")
 
 HOST = os.environ.get("ICON_HOST", "0.0.0.0")
-PORT = int(os.environ.get("ICON_PORT", "8000"))
+PORT = int(os.environ.get("PORT") or os.environ.get("ICON_PORT") or "8000")
 MAX_REQUEST_BYTES = max(64 * 1024, int(os.environ.get("MAX_REQUEST_BYTES", str(5 * 1024 * 1024))))
 MAX_RESTORE_BYTES = max(MAX_REQUEST_BYTES, int(os.environ.get("MAX_RESTORE_BYTES", str(512 * 1024 * 1024))))
 # Set when the frontend is hosted on a different origin than this API (e.g. a
@@ -400,6 +400,20 @@ async def get_snapshot(request: Request) -> dict:
     data = await run_in_threadpool(store.snapshot)
     data.update(lan_metadata())
     data["backupReminder"] = await run_in_threadpool(store.backup_status)
+    return {"success": True, "data": data}
+
+
+@app.get("/api/v1/summary")
+async def get_summary(request: Request) -> dict:
+    require_identity(request)
+    data = await run_in_threadpool(store.summary)
+    return {"success": True, "data": data}
+
+
+@app.get("/api/v1/delta")
+async def get_delta(request: Request, since: int = 0) -> dict:
+    require_identity(request)
+    data = await run_in_threadpool(store.delta, since)
     return {"success": True, "data": data}
 
 

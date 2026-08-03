@@ -86,10 +86,26 @@ class PgConnection:
         return cursor
 
 
+_POOL_ACQUIRE_TIMEOUT = float(os.environ.get("DB_POOL_TIMEOUT", "15"))
+# Matches the pool max so getconn() can never block forever. The semaphore
+# acquire timeout turns a wedged pool into a fast, clear error.
+_pool_semaphore = threading.BoundedSemaphore(12)
+
+
 @contextmanager
 def connection(*, read_only: bool = False) -> Iterator[PgConnection]:
     handle = get_pool()
-    raw = handle.getconn()
+    if not _pool_semaphore.acquire(timeout=_POOL_ACQUIRE_TIMEOUT):
+        raise RuntimeError(
+            "Database connection pool is busy. Please try again in a moment."
+        )
+    try:
+        raw = handle.getconn()
+    except Exception as exc:
+        _pool_semaphore.release()
+        raise RuntimeError(
+            "Database connection pool is busy. Please try again in a moment."
+        ) from exc
     raw.autocommit = False
     try:
         yield PgConnection(raw)
@@ -99,6 +115,7 @@ def connection(*, read_only: bool = False) -> Iterator[PgConnection]:
         raise
     finally:
         handle.putconn(raw)
+        _pool_semaphore.release()
 
 
 # ---------------------------------------------------------------------------
