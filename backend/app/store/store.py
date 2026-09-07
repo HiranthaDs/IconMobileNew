@@ -778,6 +778,7 @@ class PostgresStore:
                         return response
 
                 revision = self._next_revision(conn)
+                touched_inventory_skus: set = set()
                 if action in {"add_item", "update_item"}:
                     result, entity_id = self._save_inventory(
                         conn, payload.get("item"), revision=revision, create=(action == "add_item")
@@ -791,13 +792,13 @@ class PostgresStore:
                     data = {"revision": revision, "deletedCode": entity_id}
                     entity_type = "inventory"
                 elif action == "delete_transaction":
-                    result = self._delete_transaction(conn, payload, revision=revision)
+                    result, touched_inventory_skus = self._delete_transaction(conn, payload, revision=revision)
                     entity_id = result["invoiceId"]
                     message = "Invoice deleted and its stock movement was reversed."
                     data = {"revision": revision, **result}
                     entity_type = "transaction"
                 elif action == "delete_transaction_item":
-                    result = self._delete_transaction_item(conn, payload, revision=revision)
+                    result, touched_inventory_skus = self._delete_transaction_item(conn, payload, revision=revision)
                     entity_id = f"{result['invoiceId']}:{result['unitCode']}"
                     message = "Invoice item deleted and totals were recalculated."
                     data = {"revision": revision, **result}
@@ -822,7 +823,7 @@ class PostgresStore:
                         raise StoreError(403, "forbidden", "Wholesale sessions cannot create retail sales")
                     if transaction_type in {"Issue", "B2B_Payment"} and actor_role not in {"wholesale", "admin"}:
                         raise StoreError(403, "forbidden", "This transaction requires wholesale access")
-                    transaction = self._checkout(conn, dict(payload), transaction_type, revision, digest)
+                    transaction, touched_inventory_skus = self._checkout(conn, dict(payload), transaction_type, revision, digest)
                     entity_id = transaction["invoiceId"]
                     entity_type = "transaction"
                     message = {
@@ -839,6 +840,14 @@ class PostgresStore:
                     (revision, operation_id, device_id, actor_role, action, entity_type, entity_id,
                      canonical_json({"message": message}), utc_now()),
                 )
+                for sku in touched_inventory_skus:
+                    inventory_revision = self._next_revision(conn)
+                    conn.execute(
+                        "INSERT INTO v2_change_log(revision,operation_id,device_id,actor_role,action,entity_type,entity_id,summary_json,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (inventory_revision, operation_id, device_id, actor_role, action, "inventory", sku,
+                         canonical_json({"message": message}), utc_now()),
+                    )
+                    data["revision"] = inventory_revision
                 conn.execute(
                     "INSERT INTO v2_operation_receipts(operation_id,device_id,actor_role,action,request_hash,invoice_id,revision,response_json,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (operation_id, device_id, actor_role, action, digest,
@@ -1088,7 +1097,7 @@ class PostgresStore:
             (invoice_id,),
         ).fetchone()
 
-    def _delete_transaction(self, conn, payload: Mapping[str, Any], *, revision: int) -> dict:
+    def _delete_transaction(self, conn, payload: Mapping[str, Any], *, revision: int) -> Tuple[dict, set]:
         invoice_id = clean_text(first_value(payload, ["invoiceId", "invoice_id", "id"], ""), maximum=180)
         if not invoice_id:
             raise StoreError(422, "missing_invoice_id", "Invoice ID is required")
@@ -1109,6 +1118,7 @@ class PostgresStore:
         ).fetchall()
         changes = [(item, self._validate_transaction_unit_reversal(conn, transaction, item)) for item in items]
         touched_products: set[int] = set()
+        touched_skus: set[str] = set()
         now = utc_now()
         for item, target in changes:
             if item["unit_id"] and target:
@@ -1118,12 +1128,14 @@ class PostgresStore:
                 )
             if item["product_id"]:
                 touched_products.add(int(item["product_id"]))
+                if item["group_code"]:
+                    touched_skus.add(item["group_code"])
         conn.execute("DELETE FROM v2_transaction_items WHERE transaction_id=%s", (transaction["id"],))
         conn.execute("DELETE FROM v2_operation_receipts WHERE invoice_id=%s", (transaction["invoice_id"],))
         conn.execute("DELETE FROM v2_transactions WHERE id=%s", (transaction["id"],))
         for product_id in touched_products:
             self._refresh_product(conn, product_id, revision)
-        return {"invoiceId": transaction["invoice_id"], "reversedUnits": len(changes)}
+        return {"invoiceId": transaction["invoice_id"], "reversedUnits": len(changes)}, touched_skus
 
     @staticmethod
     def _remove_unit_from_raw_lines(lines: Any, unit_code: str) -> list:
@@ -1156,7 +1168,7 @@ class PostgresStore:
             updated.append(line)
         return updated
 
-    def _delete_transaction_item(self, conn, payload: Mapping[str, Any], *, revision: int) -> dict:
+    def _delete_transaction_item(self, conn, payload: Mapping[str, Any], *, revision: int) -> Tuple[dict, set]:
         invoice_id = clean_text(first_value(payload, ["invoiceId", "invoice_id"], ""), maximum=180)
         unit_code = clean_text(first_value(payload, ["unitCode", "unitImei", "imei", "code"], ""), maximum=180)
         if not invoice_id or not unit_code:
@@ -1226,13 +1238,16 @@ class PostgresStore:
             (subtotal, discount, total, quantity, canonical_json(raw), revision, transaction["id"]),
         )
         conn.execute("DELETE FROM v2_operation_receipts WHERE invoice_id=%s", (transaction["invoice_id"],))
+        touched_skus: set[str] = set()
         if item["product_id"]:
             self._refresh_product(conn, int(item["product_id"]), revision)
+            if item["group_code"]:
+                touched_skus.add(item["group_code"])
         updated = conn.execute("SELECT * FROM v2_transactions WHERE id=%s", (transaction["id"],)).fetchone()
         return {
             "invoiceId": transaction["invoice_id"], "unitCode": item["unit_code"],
             "transaction": self._transaction_to_dict(conn, updated),
-        }
+        }, touched_skus
 
     def _refresh_product(self, conn, product_id: int, revision: int) -> None:
         available = conn.execute(
@@ -1248,7 +1263,7 @@ class PostgresStore:
     # Checkout / issue / return / payment
     # ------------------------------------------------------------------
 
-    def _checkout(self, conn, payload: dict, transaction_type: str, revision: int, digest: str) -> dict:
+    def _checkout(self, conn, payload: dict, transaction_type: str, revision: int, digest: str) -> Tuple[dict, set]:
         invoice_id = clean_text(payload.get("invoiceId"), maximum=180)
         if not invoice_id:
             prefix = {"Sale": "INV", "Issue": "B2B", "Return": "RET", "B2B_Payment": "PMT"}[transaction_type]
@@ -1300,6 +1315,7 @@ class PostgresStore:
         stored_items: List[dict] = []
         item_rows: List[dict] = []
         touched_products: set[int] = set()
+        touched_skus: set[str] = set()
         calculated_total = 0
         calculated_qty = 0
         line_discount_total = 0
@@ -1333,6 +1349,7 @@ class PostgresStore:
                         "raw": line,
                     })
                 touched_products.add(product["id"])
+                touched_skus.add(product["sku"])
                 canonical_line = dict(line)
                 canonical_line.update({
                     "groupCode": product["sku"],
@@ -1374,6 +1391,7 @@ class PostgresStore:
                         "discount_cents": 0, "cost_cents": unit["cost_cents"], "raw": line,
                     })
                 touched_products.add(product["id"])
+                touched_skus.add(product["sku"])
                 canonical_line = dict(line)
                 canonical_line.update({"allocatedUnits": allocated, "cartQty": quantity})
                 if quantity == 1:
@@ -1468,7 +1486,7 @@ class PostgresStore:
                  row["quantity"], row["price_cents"], row["discount_cents"], row["cost_cents"],
                  canonical_json(row["raw"])),
             )
-        return payload
+        return payload, touched_skus
 
     def _resolve_product(self, conn, line: Mapping[str, Any]):
         group_code = clean_text(first_value(
