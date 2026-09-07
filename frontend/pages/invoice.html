@@ -312,7 +312,9 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
 
             const displayDiscount = safePrice(invoiceData.discount || invoiceData.globalDiscount || client.discount);
             const totalQuantity = invoiceData.totalQuantity || invoiceData.totalQty || client.totalQuantity || purchasedItems.length || 0;
-            const date = invoiceData.date || client.date || invoiceData.invoiceDate || invoiceData.timestamp || "";
+            const rawDate = invoiceData.date || client.date || invoiceData.invoiceDate || invoiceData.timestamp || "";
+            const parsedDate = rawDate ? new Date(rawDate) : null;
+            const date = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.toLocaleString() : rawDate;
             const invoiceId = invoiceData.invoiceId || client.invoiceId || "";
             const clientName = client.name || invoiceData.name || '-';
             const clientPhone = client.phone || invoiceData.phone || '-';
