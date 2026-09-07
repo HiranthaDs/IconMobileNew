@@ -1497,8 +1497,22 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                     const res = await window.IconAPI.action({ action, item: finalItem });
                     if (!res || res.success !== true) throw new Error(res?.error || res?.message || 'Inventory save failed.');
                     showToast(`Successfully ${isEditing ? 'updated' : 'added'}!`);
-                    await fetchData(true);
+                    const savedItem = res?.data?.item;
+                    if (savedItem) {
+                        const savedCode = String(savedItem.code || savedItem["IMEI or Item Code"] || savedItem.IMEI || "");
+                        setInventory(prev => {
+                            const idx = prev.findIndex(p => String(p.code || p["IMEI or Item Code"] || p.IMEI || "") === savedCode);
+                            if (idx >= 0) {
+                                const next = [...prev];
+                                next[idx] = savedItem;
+                                return next;
+                            }
+                            return [savedItem, ...prev];
+                        });
+                    }
+                    setSearchQuery("");
                     setView('list');
+                    fetchData(true);
                 } catch (error) { showToast(`Local server error: ${error?.message || error}`); }
                 setActionLoading(false);
             };
@@ -1510,8 +1524,9 @@ if (!window.IconAPI) { throw new Error('Local API client did not load. Open this
                 try {
                     const result = await window.IconAPI.action({ action: 'delete_item', imei: code });
                     if (!result?.success) throw new Error(result?.message || 'Inventory deletion failed.');
-                    await fetchData(true);
+                    setInventory(prev => prev.filter(p => String(p.code || p["IMEI or Item Code"] || p.IMEI || "") !== String(code)));
                     showToast(`Inventory product ${code} deleted.`);
+                    fetchData(true);
                 } catch (error) { showToast(error?.message || String(error)); }
                 finally { setActionLoading(false); }
             };

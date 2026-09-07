@@ -779,6 +779,7 @@ class PostgresStore:
 
                 revision = self._next_revision(conn)
                 touched_inventory_skus: set = set()
+                log_action = action
                 if action in {"add_item", "update_item"}:
                     result, entity_id = self._save_inventory(
                         conn, payload.get("item"), revision=revision, create=(action == "add_item")
@@ -787,10 +788,14 @@ class PostgresStore:
                     data = {"revision": revision, "item": result}
                     entity_type = "inventory"
                 elif action == "delete_item":
-                    entity_id = self._delete_inventory(conn, payload, revision=revision)
+                    entity_id, whole_product_deleted = self._delete_inventory(conn, payload, revision=revision)
                     message = "Inventory item deleted."
                     data = {"revision": revision, "deletedCode": entity_id}
                     entity_type = "inventory"
+                    if not whole_product_deleted:
+                        # Only one unit was removed and the product is still active, so
+                        # clients should refresh that product's entry, not drop it.
+                        log_action = "update_item"
                 elif action == "delete_transaction":
                     result, touched_inventory_skus = self._delete_transaction(conn, payload, revision=revision)
                     entity_id = result["invoiceId"]
@@ -837,7 +842,7 @@ class PostgresStore:
                 response = {"success": True, "duplicate": False, "message": message, "data": data}
                 conn.execute(
                     "INSERT INTO v2_change_log(revision,operation_id,device_id,actor_role,action,entity_type,entity_id,summary_json,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (revision, operation_id, device_id, actor_role, action, entity_type, entity_id,
+                    (revision, operation_id, device_id, actor_role, log_action, entity_type, entity_id,
                      canonical_json({"message": message}), utc_now()),
                 )
                 for sku in touched_inventory_skus:
@@ -926,7 +931,7 @@ class PostgresStore:
         product = conn.execute("SELECT * FROM v2_products WHERE id=%s", (product_id,)).fetchone()
         return self._product_to_dict(conn, product), sku
 
-    def _delete_inventory(self, conn, payload: Mapping[str, Any], *, revision: int) -> str:
+    def _delete_inventory(self, conn, payload: Mapping[str, Any], *, revision: int) -> Tuple[str, bool]:
         code = clean_text(first_value(payload, ["imei", "sku", "code", "product_id"]), maximum=180)
         if not code:
             raise StoreError(422, "missing_sku", "Product code is required")
@@ -945,7 +950,10 @@ class PostgresStore:
                     (utc_now(), revision, unit["id"]),
                 )
                 self._refresh_product(conn, unit["product_id"], revision)
-                return code
+                owner = conn.execute(
+                    "SELECT sku FROM v2_products WHERE id=%s", (unit["product_id"],)
+                ).fetchone()
+                return (owner["sku"] if owner else code), False
             raise StoreError(404, "product_not_found", f"Inventory code '{code}' was not found")
         active = conn.execute(
             "SELECT unit_code,status FROM v2_units WHERE product_id=%s AND deleted=0 AND status NOT IN ('Available','Returned')",
@@ -962,7 +970,7 @@ class PostgresStore:
             "UPDATE v2_products SET deleted=1,aggregate_quantity=0,updated_at=%s,revision=%s WHERE id=%s",
             (now, revision, product["id"]),
         )
-        return product["sku"]
+        return product["sku"], True
 
     @staticmethod
     def _client_id_from_payload(payload: Mapping[str, Any]) -> int:
